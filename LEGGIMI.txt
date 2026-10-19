@@ -1,0 +1,130 @@
+MONITOR SWITCH 2.1 - Windows 10/11 x64
+
+AVVIO
+Avvia MonitorSwitch.exe. Non servono installazione, rete o amministratore.
+Usa il .NET Framework 4.x gia incluso in Windows.
+
+GIOCO E LAVORO
+Profili iniziali:
+  Gioco: duplica gli schermi.
+  Lavoro: mostra solo i monitor esterni.
+  Due schermi: estendi.
+  Solo portatile: usa soltanto lo schermo interno.
+Se alla prima apertura stai gia duplicando, Gioco acquisisce quella
+configurazione esatta, con risoluzioni e frequenze. Altrimenti usa Duplica.
+
+In basso scegli i due profili da alternare: Passa a... oppure Ctrl+Alt+F10
+passano dall'uno all'altro. Se la configurazione attuale non corrisponde al
+primo profilo, viene applicato il primo.
+
+Inizialmente ogni cambio richiede conferma entro 20 secondi: premi Mantieni.
+Ripristina, Esc o il timeout tornano alla configurazione precedente.
+Dopo aver verificato i profili puoi togliere Conferma dopo il cambio in
+basso a destra: il cambio riuscito viene mantenuto subito, con un clic.
+
+PERSONALIZZAZIONE
+Nuovo crea un profilo con nome, modalita e tasto rapido a scelta.
+Modifica cambia nome, modalita e scorciatoia del profilo selezionato.
+Applica profilo selezionato o doppio clic lo attivano.
+Elimina rimuove il profilo dopo conferma; mantieni almeno un profilo.
+Personalizza tasto rapido cambia la scorciatoia dell'interruttore.
+
+CONFIGURAZIONI PRECISE E MONITOR SPECIFICI
+Per scegliere le risoluzioni direttamente nel programma:
+1. Seleziona un profilo e premi Modifica, oppure crea un Nuovo profilo.
+2. Scegli la modalita e attiva Personalizza monitor e risoluzioni.
+3. Scegli o scrivi la risoluzione per ogni monitor, per esempio 1920 x 1080.
+4. Salva il profilo e applicalo: il driver verifica il cambio prima di farlo.
+In Duplica la risoluzione desktop e comune: cambiandone una si aggiornano
+anche gli altri monitor. In Estendi puo essere diversa per ogni schermo.
+La frequenza del segnale attuale o preferita viene mantenuta.
+In Configurazione salvata puoi scegliere quali monitor lasciare attivi.
+Per Estendi e Solo esterni con risoluzioni personalizzate la disposizione
+viene generata da sinistra a destra. Per conservare una disposizione diversa
+usa Configurazione salvata o acquisisci le impostazioni di Windows.
+
+Per acquisire anche disposizione, orientamento e frequenze da Windows:
+1. Premi Impostazioni Windows.
+2. Configura gli schermi: quali usare, duplicazione/estensione, risoluzione,
+   frequenza, orientamento, disposizione e monitor primario.
+3. Torna nell'app, premi Aggiorna monitor e Salva configurazione attuale.
+4. Assegna un nome diverso dagli altri e una scorciatoia, se la desideri.
+Per aggiornare un profilo: Modifica > Usa la configurazione attuale > Salva.
+Disposizione, orientamento e frequenze si modificano in Windows, poi l'app
+le acquisisce e le richiama. Le risoluzioni si possono modificare nell'app.
+
+I monitor salvati sono identificati tramite il percorso dispositivo Windows
+e riassociati agli identificatori attuali della GPU, anche dopo un riavvio.
+Un cambio di porta/dock/driver puo cambiare l'identita: ricrea il profilo.
+Se manca un monitor richiesto dal profilo, quel profilo non viene applicato.
+
+SCORCIATOIE INIZIALI
+Ctrl+Alt+F1: Gioco
+Ctrl+Alt+F2: Lavoro
+Ctrl+Alt+F3: Due schermi
+Ctrl+Alt+F4: Solo portatile
+Ctrl+Alt+F10: interruttore tra i due profili scelti
+Sono personalizzabili: scegli Nessuna per disattivarne una.
+Le combinazioni duplicate nell'app sono rifiutate. Se una combinazione e
+occupata da Windows o altre app, compare un messaggio in basso: cambiala
+oppure usa i pulsanti. Le scorciatoie richiedono l'app in esecuzione.
+Quando cambi profilo da scorciatoia o dal menu dell'icona, la finestra
+principale rimane nel tray. Se Conferma dopo il cambio e attiva, compare
+solo la finestra temporanea di conferma; altrimenti il cambio e silenzioso.
+
+AREA VICINO ALL'OROLOGIO
+Minimizza per lasciare l'app nell'area di notifica con i tasti attivi.
+Doppio clic sull'icona riapre la finestra; clic destro mostra i profili.
+Esci o la X chiudono l'app: la configurazione mantenuta resta attiva.
+
+RICONOSCIMENTO MONITOR
+La tabella mostra nome, interno/esterno, stato, risoluzione desktop,
+frequenza del segnale e GPU di uscita. Include i monitor collegati ma
+disattivati quando il driver li segnala disponibili. Si aggiorna agli eventi
+di Windows; puoi premere Aggiorna monitor manualmente.
+L'uscita puo essere gestita da Intel mentre NVIDIA esegue i giochi:
+non servono modifiche ai pannelli Intel o NVIDIA per utilizzare l'app.
+
+PROTEZIONE E DATI
+Prima di ogni cambio viene conservata la configurazione precedente.
+Un processo separato sorveglia il cambio fino al completamento, poi termina.
+Errore, mancata conferma o uscita del processo principale prima del
+completamento fanno tentare il ripristino. Un backup rimasto viene recuperato
+alla successiva apertura, prima di consentire altri cambi.
+Il recupero puo fallire se i monitor o gli identificatori del driver sono
+cambiati: ricollega i monitor originali e riapri l'app. Il backup rimane
+disponibile finche il recupero non riesce.
+
+Profili: %LOCALAPPDATA%\MonitorSwitch\profiles.xml
+Backup pendente: %LOCALAPPDATA%\MonitorSwitch\pending-display.bin
+Errori: %LOCALAPPDATA%\MonitorSwitch\errors.log
+Non eliminare il backup di un cambio non ancora recuperato.
+
+LIMITI
+Le modalita rapide richiamano le configurazioni compatibili di Windows,
+come Win+P. Solo esterni puo attivare piu schermi esterni: per sceglierne
+uno preciso salva una configurazione personalizzata.
+Duplicare non garantisce il 16:9: dipende dalla risoluzione comune e da
+monitor/driver. Il pannello del portatile puo avere un formato nativo diverso.
+I profili salvano monitor attivi, disposizione, risoluzioni, orientamento,
+frequenze e timing. Non gestiscono HDR, luminosita, DPI, colori, VRR o
+impostazioni interne dei giochi. Lo scaling personalizzato resta al driver.
+L'app non emula monitor e non nasconde le risoluzioni ai giochi.
+
+VERIFICHE E SVILUPPO
+Compila con: powershell -File .\build.ps1
+71 controlli automatici superati senza cambiare schermi; rilevamento dei due
+monitor e validazione driver di profilo acquisito, estensione con risoluzioni
+native distinte e duplicazione a 1920 x 1080 riusciti.
+I cambi reali tra tutte le modalita richiedono una prova sul PC.
+
+Opzioni sviluppatore, con percorsi di output assoluti:
+MonitorSwitch.exe --self-test percorso-report.txt
+MonitorSwitch.exe --diagnose percorso-diagnostica.txt
+MonitorSwitch.exe --validate-current percorso-validazione.txt
+MonitorSwitch.exe --validate-editor percorso-validazione-editor.txt
+MonitorSwitch.exe --render-preview percorso-anteprima.png
+MonitorSwitch.exe --render-dialogs cartella-anteprime
+Le prime tre verificano/leggono senza applicare cambi video.
+
+https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setdisplayconfig

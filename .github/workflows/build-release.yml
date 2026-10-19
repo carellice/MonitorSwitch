@@ -1,0 +1,58 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Build, test and package
+        shell: pwsh
+        run: ./release.ps1
+      - name: Upload portable and checksums
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: MonitorSwitch-windows-x64
+          path: |
+            release/MonitorSwitch-portable-win-x64.zip
+            release/MonitorSwitch.exe
+            release/SHA256SUMS.txt
+            release/self-test-report.txt
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: MonitorSwitch-windows-x64
+          path: release
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cat > release-notes.md <<'NOTES'
+          ## Download
+          - **MonitorSwitch-portable-win-x64.zip**: recommended portable package. Extract it and run MonitorSwitch.exe.
+          - **MonitorSwitch.exe**: standalone executable.
+          - **SHA256SUMS.txt**: checksums for both downloads.
+
+          Windows 10/11 x64. No installation required. The interface is currently in Italian.
+          NOTES
+          gh release create "$RELEASE_TAG" release/MonitorSwitch-portable-win-x64.zip release/MonitorSwitch.exe release/SHA256SUMS.txt --verify-tag --title "MonitorSwitch $RELEASE_TAG" --notes-file release-notes.md --latest

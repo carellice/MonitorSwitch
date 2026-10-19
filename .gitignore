@@ -1,0 +1,7 @@
+dist/
+release/
+tests/
+*.tmp
+.vs/
+*.user
+*.suo

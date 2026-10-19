@@ -1,0 +1,30 @@
+MonitorSwitch 2.1 - Windows 10/11 x64
+
+Extract the ZIP, then run MonitorSwitch.exe. No installation or administrator
+rights are required. The app uses the .NET Framework included with Windows.
+
+The default Game (Gioco) and Work (Lavoro) profiles switch between duplicated
+screens and external displays only. You can rename profiles, choose other
+display modes, save the current layout, and assign global keyboard shortcuts.
+
+Click Modifica (Edit), enable Personalizza monitor e risoluzioni (Customize
+monitors and resolutions), and select or type a resolution for each display.
+Duplicated monitors share one desktop resolution. Extended displays can use
+different resolutions.
+
+Ctrl+Alt+F10 switches between the two profiles selected at the bottom.
+Ctrl+Alt+F1 through F4 apply the four default profiles. All shortcuts can be
+customized. Keyboard and tray-menu switches keep the main window in the tray.
+
+Confirm changes within 20 seconds, or the previous configuration is restored.
+After testing your profiles, uncheck Conferma dopo il cambio to switch with
+one click. Minimize to keep shortcuts available. Closing the app keeps the
+last confirmed display configuration active.
+
+Profiles: %LOCALAPPDATA%\MonitorSwitch\profiles.xml
+Errors: %LOCALAPPDATA%\MonitorSwitch\errors.log
+
+The interface is currently in Italian. Full Italian instructions: LEGGIMI.txt.
+
+Project and releases: https://github.com/carellice/MonitorSwitch
+License: MIT (see LICENSE).
