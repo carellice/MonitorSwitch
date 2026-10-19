@@ -105,7 +105,9 @@ namespace MonitorSwitch
         public string SwitchB { get; set; }
         public Shortcut SwitchHotkey { get; set; }
         public bool ConfirmChanges { get; set; }
-        public Settings() { Version = 1; Profiles = new List<Profile>(); SwitchHotkey = new Shortcut(); ConfirmChanges = true; }
+        public bool CheckUpdatesOnStartup { get; set; }
+        public string LastUpdateCheckUtc { get; set; }
+        public Settings() { Version = 1; Profiles = new List<Profile>(); SwitchHotkey = new Shortcut(); ConfirmChanges = true; CheckUpdatesOnStartup = true; }
         public static Settings Defaults()
         {
             var s = new Settings();

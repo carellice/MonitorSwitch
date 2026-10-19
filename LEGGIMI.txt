@@ -1,7 +1,8 @@
-MONITOR SWITCH 2.1 - Windows 10/11 x64
+MONITOR SWITCH 2.2 - Windows 10/11 x64
 
 AVVIO
-Avvia MonitorSwitch.exe. Non servono installazione, rete o amministratore.
+Avvia MonitorSwitch.exe. Non servono installazione o amministratore.
+Il cambio dei monitor funziona offline; gli aggiornamenti richiedono rete.
 Usa il .NET Framework 4.x gia incluso in Windows.
 
 GIOCO E LAVORO
@@ -100,6 +101,29 @@ Backup pendente: %LOCALAPPDATA%\MonitorSwitch\pending-display.bin
 Errori: %LOCALAPPDATA%\MonitorSwitch\errors.log
 Non eliminare il backup di un cambio non ancora recuperato.
 
+AGGIORNAMENTI DAL PROGRAMMA
+Premi Aggiornamenti nella finestra o nel menu dell'icona nel tray.
+Il programma interroga la release stabile piu recente di carellice/MonitorSwitch
+su GitHub. Se e piu nuova, mostra le note e il pulsante Scarica e riavvia.
+Solo premendo quel pulsante vengono scaricati e installati gli aggiornamenti.
+Non serve un account GitHub.
+
+Il file viene controllato tramite SHA-256 fornito dall'API GitHub, formato
+Windows x64 e versione incorporata. Un processo temporaneo aspetta la chiusura
+dell'app, sostituisce l'eseguibile e riavvia MonitorSwitch. I profili restano
+invariati; se l'app era nel tray viene riavviata nel tray.
+La copia precedente rimane accanto al programma come MonitorSwitch.exe.previous.
+Se il nuovo processo termina prima della conferma di avvio, viene ripristinata.
+I file temporanei di aggiornamento sono in %LOCALAPPDATA%\MonitorSwitch\updates.
+La cartella dell'eseguibile deve essere scrivibile dall'utente.
+
+Nel tray puoi attivare/disattivare Controlla aggiornamenti all'avvio.
+Il controllo automatico riuscito si ripete al massimo una volta ogni 24 ore;
+il pulsante manuale permette sempre un nuovo controllo. I controlli automatici
+non installano nulla senza la scelta dell'utente.
+Le versioni 2.1.0 e precedenti richiedono un primo download manuale della 2.2.0
+o successiva per ottenere questa funzione.
+
 LIMITI
 Le modalita rapide richiamano le configurazioni compatibili di Windows,
 come Win+P. Solo esterni puo attivare piu schermi esterni: per sceglierne
@@ -113,7 +137,7 @@ L'app non emula monitor e non nasconde le risoluzioni ai giochi.
 
 VERIFICHE E SVILUPPO
 Compila con: powershell -File .\build.ps1
-71 controlli automatici superati senza cambiare schermi; rilevamento dei due
+94 controlli automatici superati senza cambiare schermi; rilevamento dei due
 monitor e validazione driver di profilo acquisito, estensione con risoluzioni
 native distinte e duplicazione a 1920 x 1080 riusciti.
 I cambi reali tra tutte le modalita richiedono una prova sul PC.
@@ -125,6 +149,8 @@ MonitorSwitch.exe --validate-current percorso-validazione.txt
 MonitorSwitch.exe --validate-editor percorso-validazione-editor.txt
 MonitorSwitch.exe --render-preview percorso-anteprima.png
 MonitorSwitch.exe --render-dialogs cartella-anteprime
+MonitorSwitch.exe --test-update-download percorso-report-download.txt
+L'ultima opzione scarica e verifica una release per test senza installarla.
 Le prime tre verificano/leggono senza applicare cambi video.
 
 https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setdisplayconfig

@@ -1,4 +1,4 @@
-MonitorSwitch 2.1 - Windows 10/11 x64
+MonitorSwitch 2.2 - Windows 10/11 x64
 
 Extract the ZIP, then run MonitorSwitch.exe. No installation or administrator
 rights are required. The app uses the .NET Framework included with Windows.
@@ -23,6 +23,15 @@ last confirmed display configuration active.
 
 Profiles: %LOCALAPPDATA%\MonitorSwitch\profiles.xml
 Errors: %LOCALAPPDATA%\MonitorSwitch\errors.log
+
+UPDATES
+Open Aggiornamenti from the window or tray menu. If a newer stable GitHub
+release exists, click Scarica e riavvia (Download and restart). Profiles are
+preserved. The download is verified against GitHub's SHA-256 asset digest
+and embedded executable version. The previous EXE is retained as .previous.
+The application folder must be writable. Automatic startup checks can be
+disabled from the tray menu; successful checks happen at most once per day.
+Version 2.1.0 and earlier need a one-time manual download to gain this feature.
 
 The interface is currently in Italian. Full Italian instructions: LEGGIMI.txt.
 

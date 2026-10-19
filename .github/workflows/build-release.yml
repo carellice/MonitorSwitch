@@ -18,6 +18,9 @@ jobs:
       - name: Build, test and package
         shell: pwsh
         run: ./release.ps1
+      - name: Test updater process handoff and restart
+        shell: pwsh
+        run: ./tools/test-updater.ps1
       - name: Upload portable and checksums
         uses: actions/upload-artifact@v7.0.2
         with:

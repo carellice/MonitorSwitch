@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Globalization;
 using System.Windows.Forms;
 
 namespace MonitorSwitch
@@ -15,14 +16,28 @@ namespace MonitorSwitch
         [DllImport("user32.dll")] private static extern bool SetProcessDPIAware();
         [STAThread] private static int Main(string[] args)
         {
+            if (args.Length == 2 && args[0] == "--apply-update") return Updates.Apply(args[1]);
+            if (args.Length >= 2 && args[0] == "--updated") { Updates.StartupReceipt = args[1]; Updates.RestartInTray = args.Contains("--tray"); }
             if (args.Length == 3 && args[0] == "--guard") return Recovery.Guard(Int32.Parse(args[1]), args[2]);
             if (args.Length == 2 && args[0] == "--self-test") return Tests.Run(args[1]);
+            if (args.Length == 2 && args[0] == "--test-update-download")
+            {
+                try
+                {
+                    UpdateInfo release = Updates.CheckAsync(CancellationToken.None, new Version(0, 0, 0, 0)).GetAwaiter().GetResult();
+                    if (release == null) throw new InvalidDataException("Nessuna release disponibile per la verifica.");
+                    string payload = Updates.DownloadAsync(release, null, CancellationToken.None, Path.GetDirectoryName(Path.GetFullPath(args[1]))).GetAwaiter().GetResult();
+                    File.WriteAllText(args[1], "PASS: GitHub API, download HTTPS, SHA-256, PE x64 e versione " + release.Version + ". Nessun file installato o eseguito.");
+                    File.Delete(payload); Directory.Delete(Path.GetDirectoryName(payload)); return 0;
+                }
+                catch (Exception ex) { File.WriteAllText(args[1], ex.ToString()); return 1; }
+            }
             if (args.Length == 2 && (args[0] == "--diagnose" || args[0] == "--validate-current" || args[0] == "--validate-editor"))
             {
                 try
                 {
                     DisplayState state = Native.Read(); var monitors = Native.Inventory(state);
-                    string report = "Monitor Switch 2.1\r\nModalita: " + Profile.ModeLabel(state.Topology()) + "\r\n" +
+                    string report = "MonitorSwitch " + Updates.CurrentLabel + "\r\nModalita: " + Profile.ModeLabel(state.Topology()) + "\r\n" +
                         String.Join("\r\n", monitors.Select(m => m.Name + " | " + m.Summary + " | " + m.Adapter + " | " + m.Key + "\r\nRisoluzioni: " + String.Join(", ", Native.Resolutions(m))));
                     if (args[0] == "--validate-current" || args[0] == "--validate-editor")
                     {
@@ -73,6 +88,7 @@ namespace MonitorSwitch
                 using (var form = new ProfileDialog(sample, false, layout, inventory)) Render(form, Path.Combine(args[1], "profile-dialog.png"));
                 using (var form = new ShortcutDialog(new Shortcut { Modifiers = 3, Key = 121 })) Render(form, Path.Combine(args[1], "shortcut-dialog.png"));
                 using (var form = new ConfirmDialog("Gioco", Stopwatch.StartNew())) Render(form, Path.Combine(args[1], "confirmation-dialog.png"));
+                using (var form = new UpdateDialog(new UpdateInfo { Version = new Version(2, 3, 0, 0), Notes = "Anteprima della finestra aggiornamenti." }, true)) Render(form, Path.Combine(args[1], "update-dialog.png"));
                 return 0;
             }
             bool first;
@@ -132,7 +148,9 @@ namespace MonitorSwitch
         private readonly NotifyIcon tray;
         private readonly System.Windows.Forms.Timer refreshTimer;
         private readonly Dictionary<int, string> hotkeys = new Dictionary<int, string>();
-        private bool loading, changing;
+        private bool loading, changing, updating;
+        private UpdateInfo availableUpdate;
+        private readonly CancellationTokenSource updateCancellation = new CancellationTokenSource();
         private ConfirmDialog confirmation;
         private Guardian guardian;
         [DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr h, int id, uint modifiers, uint key);
@@ -200,7 +218,8 @@ namespace MonitorSwitch
             var displayFooter = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty, Padding = new Padding(0, 8, 0, 0) };
             var refresh = Theme.Button("Aggiorna monitor", false); refresh.Width = 158; refresh.Click += delegate { RefreshDisplays(true); };
             var help = Theme.Button("Come funziona", false); help.Width = 151; help.Click += delegate { ShowHelp(); };
-            displayFooter.Controls.AddRange(new Control[] { refresh, help }); displayPanel.Controls.Add(displayFooter, 0, 3); body.Controls.Add(displayPanel, 2, 0);
+            var updates = Theme.Button("Aggiornamenti", false); updates.Width = 150; updates.Click += delegate { ShowUpdates(); };
+            displayFooter.Controls.AddRange(new Control[] { refresh, help, updates }); displayPanel.Controls.Add(displayFooter, 0, 3); body.Controls.Add(displayPanel, 2, 0);
             var switchCard = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Card, Padding = new Padding(16, 10, 16, 10), ColumnCount = 2, RowCount = 3, Margin = Padding.Empty };
             switchCard.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); switchCard.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 290));
             switchCard.RowStyles.Add(new RowStyle(SizeType.Absolute, 33)); switchCard.RowStyles.Add(new RowStyle(SizeType.Absolute, 45)); switchCard.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -266,8 +285,51 @@ namespace MonitorSwitch
             menu.Items.Add("Interruttore: " + settings.SwitchHotkey.Label, null, delegate { TogglePair(true); }); menu.Items.Add(new ToolStripSeparator());
             foreach (Profile profile in settings.Profiles) { Profile p = profile; menu.Items.Add(p.Name + "  (" + p.Hotkey.Label + ")", null, delegate { ApplyProfile(p, true); }); }
             menu.Items.Add(new ToolStripSeparator()); menu.Items.Add("Esci", null, delegate { Close(); }); tray.ContextMenuStrip = menu; if (old != null) old.Dispose();
+            menu.Items.Insert(menu.Items.Count - 1, new ToolStripMenuItem("Aggiornamenti…", null, delegate { ShowUpdates(); }));
+            var automatic = new ToolStripMenuItem("Controlla aggiornamenti all'avvio") { Checked = settings.CheckUpdatesOnStartup, CheckOnClick = true };
+            automatic.CheckedChanged += delegate { settings.CheckUpdatesOnStartup = automatic.Checked; SaveSettings(); };
+            menu.Items.Insert(menu.Items.Count - 1, automatic);
         }
-        protected override void OnShown(EventArgs e) { base.OnShown(e); if (!preview) RegisterShortcuts(); }
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            if (!preview) { RegisterShortcuts(); Updates.SignalStarted(); if (Updates.RestartInTray) StayInTray(); CheckUpdatesAtStartup(); }
+        }
+        private async void CheckUpdatesAtStartup()
+        {
+            DateTime previous;
+            if (!settings.CheckUpdatesOnStartup || (DateTime.TryParse(settings.LastUpdateCheckUtc, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out previous) && previous.ToUniversalTime() <= DateTime.UtcNow && DateTime.UtcNow - previous.ToUniversalTime() < TimeSpan.FromDays(1))) return;
+            try
+            {
+                UpdateInfo result = await Updates.CheckAsync(updateCancellation.Token);
+                if (IsDisposed) return;
+                settings.LastUpdateCheckUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture); SaveSettings(); availableUpdate = result;
+                if (result != null)
+                {
+                    status.Text = "Disponibile MonitorSwitch " + result.Version.ToString(3) + ". Premi Aggiornamenti per installarlo.";
+                    tray.ShowBalloonTip(5000, "Aggiornamento disponibile", "MonitorSwitch " + result.Version.ToString(3) + " e disponibile. Apri Aggiornamenti dal menu dell'icona.", ToolTipIcon.Info);
+                }
+            }
+            catch (Exception ex) { if (!updateCancellation.IsCancellationRequested) Recovery.Log(ex); }
+        }
+        private async void ShowUpdates()
+        {
+            if (preview || updating || changing) return; updating = true;
+            bool inTray = !Visible || WindowState == FormWindowState.Minimized;
+            try
+            {
+                using (var dialog = new UpdateDialog(availableUpdate))
+                {
+                    DialogResult result = inTray ? dialog.ShowDialog() : dialog.ShowDialog(this);
+                    if (result != DialogResult.OK || String.IsNullOrEmpty(dialog.Package)) return;
+                    status.Text = "Riavvio per completare l'aggiornamento…";
+                    await Updates.LaunchAsync(dialog.Package, inTray);
+                    updating = false; Close();
+                }
+            }
+            catch (Exception ex) { ShowError(ex); }
+            finally { updating = false; }
+        }
         private void RegisterShortcuts()
         {
             foreach (int id in hotkeys.Keys) UnregisterHotKey(Handle, id); hotkeys.Clear(); var occupied = new List<string>(); int keyId = 1;
@@ -334,7 +396,7 @@ namespace MonitorSwitch
         }
         private void TogglePair(bool background = false)
         {
-            if (changing || preview) return; RefreshDisplays(false);
+            if (changing || updating || preview) return; RefreshDisplays(false);
             Profile a = pairA.SelectedItem as Profile, b = pairB.SelectedItem as Profile;
             if (a == null || b == null || a.Id == b.Id) { status.Text = "Scegli due profili diversi per l'interruttore."; return; }
             ApplyProfile(Matches(a) ? b : a, background);
@@ -342,7 +404,7 @@ namespace MonitorSwitch
         private void ApplySelected() { if (Selected != null) ApplyProfile(Selected); }
         private void ApplyProfile(Profile profile, bool background = false)
         {
-            if (preview || changing) return;
+            if (preview || changing || updating) return;
             if (background) StayInTray();
             try
             {
@@ -453,6 +515,7 @@ namespace MonitorSwitch
             {
                 if (IsHandleCreated) foreach (int id in hotkeys.Keys) UnregisterHotKey(Handle, id);
                 refreshTimer.Dispose(); tray.Visible = false; if (tray.ContextMenuStrip != null) tray.ContextMenuStrip.Dispose(); tray.Dispose();
+                updateCancellation.Cancel();
             }
             base.Dispose(disposing);
         }

@@ -152,10 +152,51 @@ namespace MonitorSwitch
                     Check(!worker.Join(40), "Guardian waits during confirmation"); stop.Set();
                     Check(worker.Join(2000) && recovery == false, "Confirmed change stops guardian and stays applied");
                 }
+                Check(Updates.ParseVersion("v2.10.0") > Updates.ParseVersion("v2.9.9"), "Update versions compared numerically");
+                Check(Updates.ParseVersion("2.2.0") == Updates.ParseVersion("v2.2.0.0"), "Release and executable versions normalized");
+                Check(Updates.ParseVersion("v2.3.0-beta") == null && Updates.ParseVersion("latest") == null, "Non-stable version strings rejected");
+                string releaseJson = "{\"tag_name\":\"v2.3.0\",\"body\":\"Release notes\",\"draft\":false,\"prerelease\":false,\"assets\":[{\"name\":\"MonitorSwitch.exe\",\"state\":\"uploaded\",\"size\":200000,\"digest\":\"sha256:" + new string('a', 64) + "\",\"browser_download_url\":\"https://github.com/carellice/MonitorSwitch/releases/download/v2.3.0/MonitorSwitch.exe\"}]}";
+                UpdateInfo update = Updates.ParseRelease(releaseJson, new Version(2, 2, 0, 0));
+                Check(update != null && update.Version == new Version(2, 3, 0, 0) && update.Hash.Length == 64, "Published stable executable recognized");
+                Check(Updates.ParseRelease(releaseJson, new Version(2, 3, 0, 0)) == null, "Same version does not update");
+                Check(Updates.ParseRelease(releaseJson, new Version(3, 0, 0, 0)) == null, "Older version does not downgrade");
+                Check(Updates.ParseRelease(releaseJson.Replace("\"draft\":false", "\"draft\":true"), new Version(1, 0, 0, 0)) == null, "Draft release ignored");
+                Check(Updates.ParseRelease(releaseJson.Replace("\"prerelease\":false", "\"prerelease\":true"), new Version(1, 0, 0, 0)) == null, "Prerelease ignored");
+                Reject(delegate { Updates.ParseRelease(releaseJson.Replace("sha256:", "sha512:"), new Version(1, 0, 0, 0)); }, "Missing SHA256 prevents updates");
+                Reject(delegate { Updates.ParseRelease(releaseJson.Replace("200000", "999999999"), new Version(1, 0, 0, 0)); }, "Oversized asset rejected");
+                Reject(delegate { Updates.ParseRelease(releaseJson.Replace("\"uploaded\"", "\"open\""), new Version(1, 0, 0, 0)); }, "Uploading asset rejected");
+                Reject(delegate { Updates.ParseRelease(releaseJson.Replace("https://github.com/", "https://example.com/"), new Version(1, 0, 0, 0)); }, "External executable URL rejected");
+                string self = System.Windows.Forms.Application.ExecutablePath, hash = Updates.HashFile(self);
+                Updates.VerifyBinary(self, hash, Updates.Current); count++;
+                Reject(delegate { Updates.VerifyBinary(self, new string('0', 64), Updates.Current); }, "Corrupt download rejected by digest");
+                Reject(delegate { Updates.VerifyBinary(self, hash, new Version(99, 0, 0, 0)); }, "Executable version must match release");
+                string payload = Path.Combine(folder, "new.exe"), target = Path.Combine(folder, "installed.exe"), backup = Path.Combine(folder, "previous.exe");
+                File.Copy(self, payload); File.AppendAllText(payload, "update-engine-test"); string newHash = Updates.HashFile(payload); File.Copy(self, target);
+                bool started = false;
+                Updates.ReplaceAndStart(payload, target, backup, newHash, Updates.Current, delegate { started = true; });
+                Check(started && Updates.HashFile(target) == newHash && Updates.HashFile(backup) == hash, "Atomic replacement preserves previous executable");
+                File.Copy(self, target, true); File.Delete(backup); bool rolledBack = false;
+                try { Updates.ReplaceAndStart(payload, target, backup, newHash, Updates.Current, delegate { throw new IOException("Simulated startup failure"); }); }
+                catch (IOException) { rolledBack = true; }
+                Check(rolledBack && Updates.HashFile(target) == hash, "Failed startup restores original executable");
+                Reject(delegate { Updates.ReplaceAndStart(payload, target, backup, new string('0', 64), Updates.Current, delegate { }); }, "Invalid candidate never replaces installed file");
+                Check(Updates.HashFile(target) == hash, "Rejected candidate leaves installed bytes unchanged");
+                string staging = Path.Combine(folder, "staging"), stage = Path.Combine(staging, "test"); Directory.CreateDirectory(stage);
+                string staged = Path.Combine(stage, "MonitorSwitch.exe"); File.Copy(self, staged);
+                var manifest = new UpdateManifest { Target = target, Payload = staged, Hash = hash, Version = Updates.Current.ToString(), ParentId = 1, ParentStarted = 1 };
+                string manifestPath = Path.Combine(stage, "update.xml"); Updates.CheckManifest(manifest, manifestPath, staging); count++;
+                Reject(delegate { Updates.CheckManifest(manifest, Path.Combine(folder, "update.xml"), staging); }, "Update manifest must stay in its staging root");
+                manifest.Payload = self;
+                Reject(delegate { Updates.CheckManifest(manifest, manifestPath, staging); }, "Manifest cannot select a payload outside staging directory");
+                Check(Updates.Quote(@"C:\Program Files\MonitorSwitch.exe") == "\"C:\\Program Files\\MonitorSwitch.exe\"", "Updater paths with spaces quoted without shell");
                 File.WriteAllText(report, "PASS: " + count + " checks. No display settings changed.\r\n"); return 0;
             }
             catch (Exception ex) { File.WriteAllText(report, "FAIL: " + ex); return 1; }
-            finally { foreach (string child in Directory.GetFiles(folder)) File.Delete(child); Directory.Delete(folder); }
+            finally
+            {
+                string root = Path.GetDirectoryName(Path.GetFullPath(report)).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                if (Path.GetFullPath(folder).StartsWith(root, StringComparison.OrdinalIgnoreCase) && Path.GetFileName(folder).StartsWith("monitor-tests-", StringComparison.Ordinal)) Directory.Delete(folder, true);
+            }
         }
     }
 }

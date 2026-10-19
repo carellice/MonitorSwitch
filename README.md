@@ -32,12 +32,13 @@ MonitorSwitch is a small, open-source Windows utility for switching between moni
 2. Extract the ZIP and open `MonitorSwitch/MonitorSwitch.exe`.
 3. Choose a profile and confirm the display change within 20 seconds.
 
-The [standalone EXE](https://github.com/carellice/MonitorSwitch/releases/latest/download/MonitorSwitch.exe) is also available. No installer is needed. The application uses the .NET Framework included with Windows; it has no NuGet or network dependencies.
+The [standalone EXE](https://github.com/carellice/MonitorSwitch/releases/latest/download/MonitorSwitch.exe) is also available. No installer is needed. The application uses the .NET Framework included with Windows; it has no external runtime packages. Display switching works offline; checking and downloading updates connects to GitHub.
 
 Release downloads include SHA-256 checksums in `SHA256SUMS.txt`. Binaries are currently unsigned.
 
 ## Features
 
+- **In-app updates:** check stable GitHub releases, verify the executable SHA-256 and version, and update the portable executable on restart while keeping profiles.
 - **Display modes:** duplicate, extend, laptop display only, or external displays only.
 - **Custom profiles:** names, global shortcuts, active monitors and saved layouts.
 - **Per-monitor resolutions:** choose a suggested resolution or enter dimensions manually. Extended displays can use different resolutions; duplicated displays share one desktop resolution.
@@ -68,6 +69,18 @@ For a precise existing arrangement or refresh rate, configure the displays in Wi
 
 Full instructions: **[Italian guide](LEGGIMI.txt)** · **[English portable guide](PORTABLE.txt)**.
 
+## Updating from the app
+
+Click **Aggiornamenti** in the main window or tray menu, then **Scarica e riavvia** when a newer stable release is available. The app downloads `MonitorSwitch.exe` from this repository's GitHub release, checks its API-provided SHA-256 digest, Windows x64 executable header and embedded version, and starts a temporary updater. It waits for the app to close, replaces the executable and restarts it. Profiles are preserved; an app that was in the tray restarts in the tray.
+
+The tray option **Controlla aggiornamenti all'avvio** enables or disables automatic startup checks. Successful automatic checks are limited to once every 24 hours; manual checks are always available. Updates are installed only after the user clicks **Scarica e riavvia**. No GitHub account or token is required.
+
+The previous executable is kept next to the app as `MonitorSwitch.exe.previous` (or the corresponding name if you renamed the EXE). If the new process exits before startup is confirmed, that executable is restored. Files are staged in `%LOCALAPPDATA%\MonitorSwitch\updates`. The application folder must be writable. SHA-256 verifies release integrity; binaries are not Authenticode-signed.
+
+**Version 2.1.0 and earlier need one manual download of version 2.2.0 or later to gain the updater.** Subsequent stable releases can be installed from within the app.
+
+Release maintainers: keep the standalone asset named `MonitorSwitch.exe`, and make the version tag agree with the embedded executable version. The updater requires GitHub's SHA-256 asset digest.
+
 ## Requirements and limitations
 
 - Windows 10/11 x64 with .NET Framework 4.x.
@@ -95,7 +108,9 @@ Packages and SHA-256 checksums are written to `release/`. Self-tests do not appl
 
 The automated suite covers profile persistence, shortcut conflicts, monitor/source assignment, clone and extend layouts, per-monitor resolution editing, recovery behavior, tray visibility and native structure layouts. Driver validation checks a proposed configuration without applying it; physical display behavior still requires hardware testing.
 
-Push a version tag such as `v2.1.0` to run the Windows build, tests and automatic GitHub release workflow. See [CONTRIBUTING.md](CONTRIBUTING.md) for development notes.
+The updater is also tested with isolated executable stubs using `tools/test-updater.ps1`, covering parent exit, file replacement, restart receipt, tray state and the retained previous executable. A separate live download check verifies GitHub API access, HTTPS redirects, SHA-256 and embedded version without installing or executing the download.
+
+Push a version tag such as `v2.2.0` to run the Windows build, tests and automatic GitHub release workflow. See [CONTRIBUTING.md](CONTRIBUTING.md) for development notes.
 
 ## Settings and recovery data
 

@@ -22,7 +22,7 @@ if (-not (Test-Path -LiteralPath $iconFile) -or (Get-Item -LiteralPath $iconSour
 }
 $sourceFiles = @(Get-ChildItem -LiteralPath (Join-Path $taskRoot 'src') -Filter '*.cs' | ForEach-Object { $_.FullName })
 $compilerOptions = @('/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/warn:4', '/warnaserror+',
-    '/r:System.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll',
+    '/r:System.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Runtime.Serialization.dll',
     ('/win32manifest:' + (Join-Path $taskRoot 'src\app.manifest')),
     ('/win32icon:' + $iconFile),
     ('/resource:' + $iconFile + ',MonitorSwitch.Icon'),
