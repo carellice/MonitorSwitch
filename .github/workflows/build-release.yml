@@ -55,4 +55,8 @@ jobs:
 
           Windows 10/11 x64. No installation required. The interface is currently in Italian.
           NOTES
-          gh release create "$RELEASE_TAG" release/MonitorSwitch-portable-win-x64.zip release/MonitorSwitch.exe release/SHA256SUMS.txt --verify-tag --title "MonitorSwitch $RELEASE_TAG" --notes-file release-notes.md --latest
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release/MonitorSwitch-portable-win-x64.zip release/MonitorSwitch.exe release/SHA256SUMS.txt --clobber
+          else
+            gh release create "$RELEASE_TAG" release/MonitorSwitch-portable-win-x64.zip release/MonitorSwitch.exe release/SHA256SUMS.txt --verify-tag --title "MonitorSwitch $RELEASE_TAG" --notes-file release-notes.md --latest
+          fi
