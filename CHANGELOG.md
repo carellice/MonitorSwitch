@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.0
+
+- Added an optional **Avvia con Windows (minimizzato)** checkbox in the main window and tray menu.
+- Windows sign-in launches the app directly in the tray with global shortcuts active, without showing the main window or requiring administrator rights.
+- Added isolated registry and tray startup tests. Startup remains disabled until explicitly enabled.
+
 ## 2.2.0
 
 - Added in-app update checking against the latest stable GitHub release.

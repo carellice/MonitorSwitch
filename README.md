@@ -44,6 +44,7 @@ Release downloads include SHA-256 checksums in `SHA256SUMS.txt`. Binaries are cu
 - **Per-monitor resolutions:** choose a suggested resolution or enter dimensions manually. Extended displays can use different resolutions; duplicated displays share one desktop resolution.
 - **One-button switch:** select two profiles and alternate between them with a button or shortcut.
 - **Tray operation:** keyboard shortcuts and tray-menu actions leave the main window hidden. With confirmation enabled, only the temporary confirmation dialog appears.
+- **Start with Windows:** optionally launch directly in the tray at sign-in, with global shortcuts ready and no main window appearing.
 - **Capture your layout:** save monitor arrangement, desktop resolutions, orientation, refresh rates and physical signal timings from the current Windows configuration.
 - **Rollback protection:** unconfirmed changes revert automatically. A separate recovery process handles a timeout or app exit during a pending change.
 - **Optional immediate switching:** once profiles are verified, disable confirmation for a one-click change.
@@ -68,6 +69,12 @@ All shortcuts are customizable. To edit resolutions, select a profile, click **M
 For a precise existing arrangement or refresh rate, configure the displays in Windows and use **Salva configurazione attuale**. The app works with the adapter that drives each display, including Intel/NVIDIA hybrid laptops.
 
 Full instructions: **[Italian guide](LEGGIMI.txt)** · **[English portable guide](PORTABLE.txt)**.
+
+## Starting with Windows
+
+Enable **Avvia con Windows (minimizzato)** in the main window or tray menu. At your next Windows sign-in, MonitorSwitch starts hidden near the clock, with global shortcuts active. Double-click its icon to open the window. Disable the same option to remove automatic startup. The option is off by default and applies only to your Windows account; no administrator rights are needed.
+
+Keep the portable EXE in a permanent location before enabling startup. If you move or rename it, open it from the new location and disable/re-enable this option to register the new path. Windows Task Manager can also disable startup apps; re-enable MonitorSwitch there if necessary. Automatic startup does not apply a display profile.
 
 ## Updating from the app
 

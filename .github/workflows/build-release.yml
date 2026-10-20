@@ -57,6 +57,10 @@ jobs:
           - **SHA256SUMS.txt**: checksums for both downloads.
 
           Windows 10/11 x64. No installation required. The interface is currently in Italian.
+
+          ## What's new in 2.3.0
+          - Optional **Avvia con Windows (minimizzato)** in the main window and tray menu.
+          - Start directly in the tray at Windows sign-in, with global shortcuts active and no administrator rights required.
           NOTES
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" release/MonitorSwitch-portable-win-x64.zip release/MonitorSwitch.exe release/SHA256SUMS.txt --clobber

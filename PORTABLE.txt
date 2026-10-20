@@ -1,4 +1,4 @@
-MonitorSwitch 2.2 - Windows 10/11 x64
+MonitorSwitch 2.3 - Windows 10/11 x64
 
 Extract the ZIP, then run MonitorSwitch.exe. No installation or administrator
 rights are required. The app uses the .NET Framework included with Windows.
@@ -23,6 +23,15 @@ last confirmed display configuration active.
 
 Profiles: %LOCALAPPDATA%\MonitorSwitch\profiles.xml
 Errors: %LOCALAPPDATA%\MonitorSwitch\errors.log
+
+START WITH WINDOWS
+Enable Avvia con Windows (minimizzato) in the main window or tray menu.
+At Windows sign-in the app starts hidden near the clock, with shortcuts ready.
+Double-click the tray icon to open it. Disable the same option to remove startup.
+No administrator rights are needed. No display profile is applied on startup.
+Keep the EXE in a permanent location; after moving or renaming it, disable and
+re-enable the option from the new location. If disabled in Windows Task Manager,
+re-enable it there as well.
 
 UPDATES
 Open Aggiornamenti from the window or tray menu. If a newer stable GitHub

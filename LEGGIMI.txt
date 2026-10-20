@@ -1,9 +1,20 @@
-MONITOR SWITCH 2.2 - Windows 10/11 x64
+MONITOR SWITCH 2.3 - Windows 10/11 x64
 
 AVVIO
 Avvia MonitorSwitch.exe. Non servono installazione o amministratore.
 Il cambio dei monitor funziona offline; gli aggiornamenti richiedono rete.
 Usa il .NET Framework 4.x gia incluso in Windows.
+
+AVVIO CON WINDOWS
+Attiva Avvia con Windows (minimizzato) nella finestra o nel menu dell'icona
+vicino all'orologio. Al prossimo accesso a Windows l'app partira direttamente
+nel tray, senza mostrare la finestra, con le scorciatoie attive.
+Fai doppio clic sull'icona per aprirla. Togli la spunta per disattivare l'avvio.
+L'opzione e inizialmente disattivata e vale solo per il tuo account Windows.
+Non viene applicato alcun profilo monitor all'avvio.
+Scegli una posizione definitiva per l'EXE prima di attivarla. Se sposti o rinomini
+il programma, aprilo dalla nuova posizione e disattiva/riattiva l'opzione.
+Se lo disabiliti in Gestione attivita di Windows, riabilitalo anche da li.
 
 GIOCO E LAVORO
 Profili iniziali:

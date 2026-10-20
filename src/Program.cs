@@ -95,12 +95,12 @@ namespace MonitorSwitch
             // Coordinate with the old Full HD app as well: only one display controller.
             using (var instance = new Mutex(true, @"Local\FullHdSwitch.App", out first))
             {
-                if (!first) { MessageBox.Show("Monitor Switch o la vecchia app Full HD e gia aperta. Chiudila dall'icona vicino all'orologio e riprova.", "Monitor Switch"); return 0; }
+                if (!first) { if (!args.Contains("--tray")) MessageBox.Show("Monitor Switch o la vecchia app Full HD e gia aperta. Chiudila dall'icona vicino all'orologio e riprova.", "Monitor Switch"); return 0; }
                 try
                 {
                     if (File.Exists(Recovery.FileName)) Recovery.Restore();
                     if (args.Length == 1 && args[0] == "--restore") return 0;
-                    Application.Run(new MainForm(false)); return 0;
+                    Application.Run(new MainForm(false, args.Contains("--tray") || Updates.RestartInTray)); return 0;
                 }
                 catch (Exception ex) { Recovery.Log(ex); MessageBox.Show(ex.Message + "\r\n\r\nDati e log: " + ProfileStore.Folder, "Monitor Switch", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
                 finally { instance.ReleaseMutex(); }
@@ -137,6 +137,8 @@ namespace MonitorSwitch
     internal sealed class MainForm : Form
     {
         private readonly bool preview;
+        private bool initialTray, startupInitialized;
+        private readonly CheckBox startWithWindows;
         private readonly Settings settings;
         private DisplayState state;
         private List<MonitorInfo> monitors = new List<MonitorInfo>();
@@ -155,17 +157,19 @@ namespace MonitorSwitch
         private Guardian guardian;
         [DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr h, int id, uint modifiers, uint key);
         [DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr h, int id);
-        public MainForm(bool isPreview)
+        public MainForm(bool isPreview, bool startInTray = false)
         {
+            initialTray = startInTray;
             preview = isPreview; bool firstLaunch = !preview && !File.Exists(ProfileStore.FileName);
             settings = preview ? Settings.Defaults() : ProfileStore.Load(ProfileStore.FileName);
-            Text = "Monitor Switch"; ClientSize = new Size(1040, 738); MinimumSize = new Size(960, 740);
+            Text = "Monitor Switch"; ClientSize = new Size(1040, 770); MinimumSize = new Size(960, 772);
             StartPosition = FormStartPosition.CenterScreen; AutoScaleDimensions = new SizeF(96, 96); AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Segoe UI", 10); BackColor = Theme.Background; ForeColor = Theme.Text; Icon = AppAssets.Icon;
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24, 16, 24, 12), ColumnCount = 1, RowCount = 6 };
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24, 16, 24, 12), ColumnCount = 1, RowCount = 7 };
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 51));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 16));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 158)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 43)); Controls.Add(root);
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 158)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 43)); Controls.Add(root);
             var heading = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty, Padding = new Padding(0, 0, 0, 12) };
             var title = Theme.Label("Monitor Switch", 25, Theme.Text); title.AutoSize = true; title.Margin = Padding.Empty;
@@ -240,7 +244,11 @@ namespace MonitorSwitch
             status = Theme.Label("Pronto. Le modifiche confermate restano attive anche chiudendo l'app.", 9, Theme.Muted); status.Dock = DockStyle.Fill; status.Padding = new Padding(0, 10, 0, 0);
             var ask = new CheckBox { Text = "Conferma dopo il cambio", Checked = settings.ConfirmChanges, Dock = DockStyle.Right, Width = 235, Font = new Font("Segoe UI", 9), ForeColor = Theme.Muted };
             ask.CheckedChanged += delegate { settings.ConfirmChanges = ask.Checked; if (!preview) SaveSettings(); status.Text = ask.Checked ? "Conferma entro 20 secondi; senza conferma il cambio viene annullato." : "Cambio immediato attivo: le configurazioni riuscite vengono mantenute subito."; };
-            bottom.Controls.Add(status); bottom.Controls.Add(ask); root.Controls.Add(bottom, 0, 5);
+            bottom.Controls.Add(status); bottom.Controls.Add(ask); root.Controls.Add(bottom, 0, 6);
+            startWithWindows = new CheckBox { Text = "Avvia con Windows (minimizzato)", AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Theme.Muted, Font = new Font("Segoe UI", 9) };
+            if (!preview) { try { startWithWindows.Checked = Startup.Enabled; } catch (Exception ex) { Recovery.Log(ex); status.Text = "Impossibile leggere l'avvio con Windows: " + ex.Message; } }
+            startWithWindows.CheckedChanged += delegate { SetStartup(startWithWindows.Checked); };
+            root.Controls.Add(startWithWindows, 0, 5);
             tray = new NotifyIcon { Text = "Monitor Switch", Icon = AppAssets.TrayIcon, Visible = !preview }; tray.DoubleClick += delegate { ShowWindow(); };
             refreshTimer = new System.Windows.Forms.Timer { Interval = 500 }; refreshTimer.Tick += delegate { refreshTimer.Stop(); if (!changing) RefreshDisplays(false); };
             Resize += delegate { if (!preview && WindowState == FormWindowState.Minimized) Hide(); };
@@ -289,11 +297,47 @@ namespace MonitorSwitch
             var automatic = new ToolStripMenuItem("Controlla aggiornamenti all'avvio") { Checked = settings.CheckUpdatesOnStartup, CheckOnClick = true };
             automatic.CheckedChanged += delegate { settings.CheckUpdatesOnStartup = automatic.Checked; SaveSettings(); };
             menu.Items.Insert(menu.Items.Count - 1, automatic);
+            var startup = new ToolStripMenuItem("Avvia con Windows (minimizzato)") { Checked = startWithWindows.Checked, Enabled = !preview };
+            startup.Click += delegate { startWithWindows.Checked = !startWithWindows.Checked; };
+            menu.Items.Insert(menu.Items.Count - 1, startup);
+        }
+        private void SetStartup(bool enabled)
+        {
+            if (preview || loading) return;
+            try
+            {
+                Startup.Enabled = enabled;
+                status.Text = enabled ? "Avvio con Windows attivo: l'app partira minimizzata vicino all'orologio." : "Avvio con Windows disattivato.";
+            }
+            catch (Exception ex)
+            {
+                loading = true; startWithWindows.Checked = !enabled; loading = false; ShowError(ex);
+            }
+            RebuildTray();
+        }
+        protected override void SetVisibleCore(bool value)
+        {
+            if (value && initialTray)
+            {
+                initialTray = false;
+                WindowState = FormWindowState.Minimized;
+                if (!IsHandleCreated) CreateHandle();
+                base.SetVisibleCore(false);
+                BeginInvoke(new Action(InitializeStartup));
+                return;
+            }
+            base.SetVisibleCore(value);
         }
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            if (!preview) { RegisterShortcuts(); Updates.SignalStarted(); if (Updates.RestartInTray) StayInTray(); CheckUpdatesAtStartup(); }
+            InitializeStartup();
+        }
+        private void InitializeStartup()
+        {
+            if (preview || startupInitialized) return;
+            startupInitialized = true;
+            RegisterShortcuts(); Updates.SignalStarted(); CheckUpdatesAtStartup();
         }
         private async void CheckUpdatesAtStartup()
         {

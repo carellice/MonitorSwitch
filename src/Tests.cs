@@ -52,6 +52,32 @@ namespace MonitorSwitch
                     window.StayInTray(); System.Windows.Forms.Application.DoEvents();
                     Check(!window.Visible && window.WindowState == System.Windows.Forms.FormWindowState.Minimized, "Background switch leaves main window hidden in tray");
                 }
+                using (var window = new MainForm(true, true))
+                {
+                    window.StartPosition = System.Windows.Forms.FormStartPosition.Manual; window.Location = new System.Drawing.Point(-30000, -30000);
+                    bool shown = false; window.Shown += delegate { shown = true; };
+                    window.Show(); System.Windows.Forms.Application.DoEvents();
+                    Check(window.IsHandleCreated && !window.Visible && !shown && window.WindowState == System.Windows.Forms.FormWindowState.Minimized, "Tray startup creates handle without showing the main window");
+                    window.Show(); window.WindowState = System.Windows.Forms.FormWindowState.Normal;
+                    System.Windows.Forms.Application.DoEvents();
+                    Check(window.Visible && shown, "Tray startup window can be opened afterwards");
+                }
+                string startupKey = @"Software\MonitorSwitch.Tests-" + Guid.NewGuid().ToString("N");
+                try
+                {
+                    using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(startupKey))
+                    {
+                        string executable = Path.Combine(folder, "Cartella con spazi", "MonitorSwitch.exe");
+                        Check(!Startup.IsEnabled(key, executable), "Windows startup is opt-in");
+                        key.SetValue("OtherApp", "untouched");
+                        Startup.SetEnabled(key, executable, true);
+                        Check(Startup.IsEnabled(key, executable) && (string)key.GetValue("MonitorSwitch") == "\"" + executable + "\" --tray", "Startup registration quotes executable paths and requests tray mode");
+                        Check(!Startup.IsEnabled(key, Path.Combine(folder, "Moved.exe")), "Startup registration detects a moved portable executable");
+                        Startup.SetEnabled(key, executable, false); Startup.SetEnabled(key, executable, false);
+                        Check(!Startup.IsEnabled(key, executable) && (string)key.GetValue("OtherApp") == "untouched", "Disabling startup is idempotent and preserves other entries");
+                    }
+                }
+                finally { Microsoft.Win32.Registry.CurrentUser.DeleteSubKey(startupKey, false); }
                 uint width, height; LayoutEditor.Resolution(" 2560 × 1440 ", out width, out height);
                 Check(width == 2560 && height == 1440, "Parse resolution with multiplication sign");
                 Reject(delegate { uint w, h; LayoutEditor.Resolution("1920", out w, out h); }, "Reject incomplete resolution");
