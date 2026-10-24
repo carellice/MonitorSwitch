@@ -7,6 +7,14 @@ namespace MonitorSwitch
 {
     internal static class LayoutEditor
     {
+        public static string Aspect(uint width, uint height)
+        {
+            if (width == 0 || height == 0) return "—";
+            if ((ulong)width * 10 == (ulong)height * 16) return "16:10";
+            uint a = width, b = height;
+            while (b != 0) { uint remainder = a % b; a = b; b = remainder; }
+            return (width / a) + ":" + (height / a);
+        }
         public static void Resolution(string text, out uint width, out uint height)
         {
             string[] parts = (text ?? "").ToLowerInvariant().Replace('×', 'x').Split('x');

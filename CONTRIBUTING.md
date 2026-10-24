@@ -19,3 +19,13 @@ Use Windows 10/11 x64 with the .NET Framework C# compiler bundled with Windows. 
 Display-changing behavior should be checked on physical hardware with rollback confirmation enabled. Automated tests and `SDC_VALIDATE` do not prove that every driver will display a requested mode correctly. Do not include local profiles, monitor diagnostics or generated binaries in commits.
 
 Keep the application lightweight and preserve compatibility with existing saved profiles. Contributions are licensed under the project's MIT license.
+
+Before a release, update the embedded version, changelog, portable guides and
+`docs/releases/<tag>.md`. The tag workflow reads that file as its release notes.
+Use `--render-preview <png>` and `--render-dialogs <folder>` for offscreen UI
+review; these modes use sample data and do not change displays or user profiles.
+The history importer uses registered Windows monitor interfaces, including
+non-present devices; do not infer historical connection dates from installation
+records. Resolution protection tests inject the correction action and must never
+apply real display changes. Do not describe reactive protection as a universal
+exclusive-fullscreen or internal rendering lock.

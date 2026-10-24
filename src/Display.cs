@@ -231,8 +231,10 @@ namespace MonitorSwitch
         { state.Check(); Check(SetDisplayConfig((uint)state.Paths.Length, state.Paths, (uint)state.Modes.Length, state.Modes, 0x20u | 0x80u | (persist ? 0x200u : 0)), "Ripristino configurazione"); }
         public static void Validate(DisplayState state)
         { state.Check(); Check(SetDisplayConfig((uint)state.Paths.Length, state.Paths, (uint)state.Modes.Length, state.Modes, 0x20u | 0x40u), "Verifica configurazione nativa"); }
+        internal static uint PlanFlags(bool validate)
+        { return 0x20u | (validate ? 0x40u : 0x80u | 0x100u); }
         public static void Plan(DisplayPlan plan, bool validate)
-        { Check(SetDisplayConfig((uint)plan.Paths.Length, plan.Paths, (uint)plan.Modes.Length, plan.Modes, 0x20u | (validate ? 0x40u : 0x80u)), validate ? "Verifica profilo" : "Applicazione profilo"); }
+        { Check(SetDisplayConfig((uint)plan.Paths.Length, plan.Paths, (uint)plan.Modes.Length, plan.Modes, PlanFlags(validate)), validate ? "Verifica profilo" : "Applicazione profilo"); }
 
         // Bind saved physical monitors to CURRENT adapter/source identifiers. LUIDs
         // from a previous boot are deliberately never used as persistent identities.
@@ -243,7 +245,7 @@ namespace MonitorSwitch
             foreach (MonitorSetting setting in layout)
             {
                 MonitorInfo monitor = monitors.FirstOrDefault(m => String.Equals(m.Key, setting.DevicePath, StringComparison.OrdinalIgnoreCase));
-                if (monitor == null) throw new InvalidOperationException("Monitor del profilo non collegato: " + setting.Name + ". Ricollegalo oppure usa una modalita rapida.");
+                if (monitor == null) throw new InvalidOperationException("Monitor del profilo non collegato: " + setting.Name + ". Ricollegalo oppure modifica il profilo.");
                 devices.Add(setting, monitor);
             }
             var groups = layout.GroupBy(s => s.Group).ToList();
@@ -310,6 +312,17 @@ namespace MonitorSwitch
                     if ((e.Group == f.Group) != (a.Group == b.Group)) return false;
                 }
             return true;
+        }
+        public static bool MatchesProtected(List<MonitorSetting> expected, List<MonitorSetting> actual)
+        {
+            return Matches(expected, actual) && expected.Where(s => s.Scaling == 4).All(e => PreservesAspect(actual.First(a => String.Equals(a.DevicePath, e.DevicePath, StringComparison.OrdinalIgnoreCase))));
+        }
+        public static bool PreservesAspect(MonitorSetting setting)
+        {
+            if (setting.Scaling == 2 || setting.Scaling == 4) return true;
+            uint width = setting.Timing.Active.Width, height = setting.Timing.Active.Height;
+            if (setting.Rotation == 2 || setting.Rotation == 4) { uint swap = width; width = height; height = swap; }
+            return width > 0 && height > 0 && (ulong)setting.Width * height == (ulong)setting.Height * width;
         }
     }
 

@@ -1,48 +1,58 @@
-MonitorSwitch 2.3 - Windows 10/11 x64
+MonitorSwitch 3.0.0 - Windows 10/11 x64
 
-Extract the ZIP, then run MonitorSwitch.exe. No installation or administrator
-rights are required. The app uses the .NET Framework included with Windows.
+Extract this package and run MonitorSwitch.exe. No installation, administrator
+rights or additional runtime packages are required. The interface is Italian.
 
-The default Game (Gioco) and Work (Lavoro) profiles switch between duplicated
-screens and external displays only. You can rename profiles, choose other
-display modes, save the current layout, and assign global keyboard shortcuts.
+History lists monitor interfaces remembered by Windows, screens observed by
+the app and displays in existing profiles, including disconnected monitors.
+Use Rinomina to give a screen a name shared by all profiles. Last-seen times
+are recorded by the app; historical Windows-only entries can have no date or
+known resolution. Changing ports/docks/drivers can create a new device identity.
 
-Click Modifica (Edit), enable Personalizza monitor e risoluzioni (Customize
-monitors and resolutions), and select or type a resolution for each display.
-Duplicated monitors share one desktop resolution. Extended displays can use
-different resolutions.
+Choose Nuovo, name the profile, check the screens to enable and select or enter
+the resolution of each. Choose the primary monitor. Unchecked screens turn off;
+multiple selected screens extend the desktop horizontally. Save, then activate.
+A disconnected screen must be reconnected before its profile can be applied.
+The active profile is verified against actual output settings, not list focus.
 
-Ctrl+Alt+F10 switches between the two profiles selected at the bottom.
-Ctrl+Alt+F1 through F4 apply the four default profiles. All shortcuts can be
-customized. Keyboard and tray-menu switches keep the main window in the tray.
+New profiles enable resolution protection. Keep the app running in the tray:
+it detects changes and checks every 1.5 seconds while a protected profile is
+armed, restores the requested resolution and verifies aspect preservation.
+No substituted resolution is accepted. A missing screen pauses protection.
+Repeated conflicts suspend it after three corrections within one minute;
+reactivate the profile after resolving the conflict. Disattiva profilo stops
+protection without changing the screens. Closing the app keeps display settings
+and stops protection. Restart only rearms a saved profile that still matches.
 
-Confirm changes within 20 seconds, or the previous configuration is restored.
-After testing your profiles, uncheck Conferma dopo il cambio to switch with
-one click. Minimize to keep shortcuts available. Closing the app keeps the
-last confirmed display configuration active.
+For games, use Borderless / Finestra senza bordi and the profile resolution.
+Exclusive fullscreen can choose its own modes and scaling. This app reacts to
+observed Windows output changes; it cannot universally lock a game's internal
+rendering resolution, field of view or exclusive-fullscreen behavior. The GPU
+must support aspect-preserving scaling. Monitor-side scaling is not controlled.
+No driver, EDID override or game hooks are installed.
 
-Profiles: %LOCALAPPDATA%\MonitorSwitch\profiles.xml
-Errors: %LOCALAPPDATA%\MonitorSwitch\errors.log
+Manual changes have a 20-second rollback confirmation by default. A separate
+recovery process protects unfinished changes. Automatic corrections use the
+backup and verification without repeated confirmation prompts.
 
-START WITH WINDOWS
-Enable Avvia con Windows (minimizzato) in the main window or tray menu.
-At Windows sign-in the app starts hidden near the clock, with shortcuts ready.
-Double-click the tray icon to open it. Disable the same option to remove startup.
-No administrator rights are needed. No display profile is applied on startup.
-Keep the EXE in a permanent location; after moving or renaming it, disable and
-re-enable the option from the new location. If disabled in Windows Task Manager,
-re-enable it there as well.
+Existing 2.x profiles and shortcuts are preserved. Exact layouts remain usable;
+old generic profiles marked Configura must be edited to select physical screens.
+Legacy protection is off until enabled. Saving in the new editor creates an
+extended layout. Quick topology buttons and the old two-profile switch are gone.
 
-UPDATES
-Open Aggiornamenti from the window or tray menu. If a newer stable GitHub
-release exists, click Scarica e riavvia (Download and restart). Profiles are
-preserved. The download is verified against GitHub's SHA-256 asset digest
-and embedded executable version. The previous EXE is retained as .previous.
-The application folder must be writable. Automatic startup checks can be
-disabled from the tray menu; successful checks happen at most once per day.
-Version 2.1.0 and earlier need a one-time manual download to gain this feature.
+Avvia con Windows (minimizzato) optionally starts the app in the tray at sign-in.
+Keep the portable EXE in a permanent location. Aggiornamenti checks GitHub and
+offers a verified download and restart. Settings/history survive an update;
+the previous EXE is kept with a .previous suffix. Startup checks are optional.
+Binaries are unsigned. SHA256SUMS.txt is available with release downloads.
 
-The interface is currently in Italian. Full Italian instructions: LEGGIMI.txt.
+Settings, monitor names and history: %LOCALAPPDATA%\MonitorSwitch\profiles.xml
+Pending recovery: %LOCALAPPDATA%\MonitorSwitch\pending-display.bin
+Diagnostics: %LOCALAPPDATA%\MonitorSwitch\errors.log
+Do not delete an unfinished recovery backup. Reconnect the original monitors
+and reopen the app if recovery cannot complete. Review logs before sharing.
 
-Project and releases: https://github.com/carellice/MonitorSwitch
-License: MIT (see LICENSE).
+Requested modes require hardware/driver support. HDR, VRR, DPI, brightness and
+color profiles are not managed. See README.md and LEGGIMI.txt for more details.
+Source and releases: https://github.com/carellice/MonitorSwitch
+MIT license. Copyright (c) 2026 carellice.

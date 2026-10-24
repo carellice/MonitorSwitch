@@ -52,9 +52,10 @@ namespace MonitorSwitch
         public Shortcut Hotkey { get; set; }
         public List<MonitorSetting> Layout { get; set; }
         public bool CustomResolutions { get; set; }
+        public bool ProtectResolution { get; set; }
         public bool HasLayout { get { return Mode == 0 || CustomResolutions; } }
-        public Profile() { Layout = new List<MonitorSetting>(); Hotkey = new Shortcut(); }
-        public string Description { get { return ModeLabel(Mode); } }
+        public Profile() { Layout = new List<MonitorSetting>(); Hotkey = new Shortcut(); ProtectResolution = true; }
+        public string Description { get { return HasLayout ? String.Join(" · ", Layout.Select(s => s.Width + " × " + s.Height + " (" + LayoutEditor.Aspect(s.Width, s.Height) + ")")) : "Da configurare: scegli i monitor"; } }
         public override string ToString() { return Name; }
         public static string ModeLabel(int mode)
         {
@@ -107,17 +108,25 @@ namespace MonitorSwitch
         public bool ConfirmChanges { get; set; }
         public bool CheckUpdatesOnStartup { get; set; }
         public string LastUpdateCheckUtc { get; set; }
-        public Settings() { Version = 1; Profiles = new List<Profile>(); SwitchHotkey = new Shortcut(); ConfirmChanges = true; CheckUpdatesOnStartup = true; }
+        public List<MonitorRecord> Monitors { get; set; }
+        public string ActiveProfileId { get; set; }
+        public bool ProfileDeactivated { get; set; }
+        [XmlIgnore] public bool PendingLegacyBackup { get; set; }
+        public Settings() { Version = 2; Profiles = new List<Profile>(); Monitors = new List<MonitorRecord>(); SwitchHotkey = new Shortcut(); ConfirmChanges = true; CheckUpdatesOnStartup = true; }
         public static Settings Defaults()
         {
-            var s = new Settings();
-            string[] names = { "Gioco", "Lavoro", "Due schermi", "Solo portatile" }; int[] modes = { 2, 8, 4, 1 };
-            for (int i = 0; i < names.Length; i++) s.Profiles.Add(new Profile { Id = Guid.NewGuid().ToString("N"), Name = names[i], Mode = modes[i], Hotkey = new Shortcut { Modifiers = 3, Key = (uint)(112 + i) } });
-            s.SwitchA = s.Profiles[0].Id; s.SwitchB = s.Profiles[1].Id; s.SwitchHotkey = new Shortcut { Modifiers = 3, Key = 121 }; return s;
+            return new Settings();
+        }
+        public void Upgrade()
+        {
+            if (Version != 1) return;
+            Version = 2; ActiveProfileId = null; PendingLegacyBackup = true;
+            foreach (Profile p in Profiles) p.ProtectResolution = false;
+            SwitchA = SwitchB = null; SwitchHotkey = new Shortcut();
         }
         public void Check()
         {
-            if (Version != 1 || Profiles == null || Profiles.Count < 1 || Profiles.Count > 64 || SwitchHotkey == null)
+            if ((Version != 1 && Version != 2) || Profiles == null || Profiles.Count > 64 || SwitchHotkey == null || Monitors == null || Monitors.Count > 512)
                 throw new InvalidDataException("Archivio profili non valido.");
             var ids = new HashSet<string>(); var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase); var shortcuts = new HashSet<string>();
             foreach (Profile p in Profiles)
@@ -126,11 +135,38 @@ namespace MonitorSwitch
                 if (!ids.Add(p.Id) || !names.Add(p.Name.Trim())) throw new InvalidDataException("Ogni profilo deve avere un nome diverso.");
                 AddShortcut(shortcuts, p.Hotkey);
             }
-            SwitchHotkey.Check(); AddShortcut(shortcuts, SwitchHotkey);
-            if (!ids.Contains(SwitchA) || !ids.Contains(SwitchB)) throw new InvalidDataException("Seleziona i due profili dell'interruttore.");
+            if (Version == 1)
+            {
+                SwitchHotkey.Check(); AddShortcut(shortcuts, SwitchHotkey);
+                if (!ids.Contains(SwitchA) || !ids.Contains(SwitchB)) throw new InvalidDataException("Seleziona i due profili dell'interruttore.");
+            }
+            if (!String.IsNullOrEmpty(ActiveProfileId) && !ids.Contains(ActiveProfileId)) throw new InvalidDataException("Profilo attivo non valido.");
+            var monitorIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (MonitorRecord m in Monitors)
+            {
+                if (m == null || String.IsNullOrWhiteSpace(m.DevicePath) || m.DevicePath.Length > 512 || !monitorIds.Add(m.DevicePath) ||
+                    String.IsNullOrWhiteSpace(m.HardwareName) || m.HardwareName.Length > 256 || (m.Alias != null && m.Alias.Length > 60) || m.Resolutions == null || m.Resolutions.Count > 512)
+                    throw new InvalidDataException("Storico monitor non valido.");
+                if (m.LastSetting != null)
+                {
+                    if (!String.Equals(m.DevicePath, m.LastSetting.DevicePath, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Identita del monitor nello storico non coerente.");
+                    Profile.CheckLayout(new List<MonitorSetting> { m.LastSetting });
+                }
+            }
         }
         private static void AddShortcut(HashSet<string> used, Shortcut key)
         { if (key.Key != 0 && !used.Add(key.Modifiers + ":" + key.Key)) throw new InvalidDataException("Questa combinazione di tasti e gia assegnata a un altro profilo o all'interruttore."); }
+    }
+    internal static class ProfileSelection
+    {
+        public static Profile Active(Settings settings, List<MonitorSetting> actual)
+        {
+            if (settings.ProfileDeactivated || actual == null) return null;
+            Profile requested = settings.Profiles.FirstOrDefault(p => p.Id == settings.ActiveProfileId);
+            if (requested != null) return requested.HasLayout && Native.MatchesProtected(requested.Layout, actual) ? requested : null;
+            var matches = settings.Profiles.Where(p => p.HasLayout && Native.MatchesProtected(p.Layout, actual)).ToList();
+            return matches.Count == 1 ? matches[0] : null;
+        }
     }
     internal static class ProfileStore
     {
@@ -141,14 +177,16 @@ namespace MonitorSwitch
             if (!File.Exists(file)) return Settings.Defaults();
             var options = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 4 * 1024 * 1024 };
             using (XmlReader reader = XmlReader.Create(file, options))
-            { var s = (Settings)new XmlSerializer(typeof(Settings)).Deserialize(reader); s.Check(); return s; }
+            { var s = (Settings)new XmlSerializer(typeof(Settings)).Deserialize(reader); s.Check(); s.Upgrade(); return s; }
         }
         public static void Save(string file, Settings settings)
         {
             settings.Check(); Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(file)));
+            if (settings.PendingLegacyBackup && File.Exists(file) && !File.Exists(file + ".v1.bak")) File.Copy(file, file + ".v1.bak");
             using (var stream = new FileStream(file + ".tmp", FileMode.Create, FileAccess.Write, FileShare.None))
             { new XmlSerializer(typeof(Settings)).Serialize(stream, settings); stream.Flush(true); }
             if (File.Exists(file)) File.Replace(file + ".tmp", file, null); else File.Move(file + ".tmp", file);
+            settings.PendingLegacyBackup = false;
         }
     }
 }

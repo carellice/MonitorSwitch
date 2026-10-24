@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.0
+
+- Redesigned the app around persistent monitor history, including disconnected interfaces remembered by Windows, and aliases shared by all profiles.
+- Profiles now select explicit monitors, a resolution per monitor and a primary display. Multiple selected displays extend the desktop; quick topology buttons and the profile pair switch have been removed.
+- Added a verified active profile indicator in the main window, list and tray, with an explicit deactivation action.
+- Added optional resolution protection, enabled for new profiles: reapply detected display changes, preserve aspect ratio, suspend on missing monitors and stop after repeated conflicts. Driver mode substitutions are rejected.
+- Preserved legacy profiles and shortcuts. Generic legacy profiles must be edited to select physical monitors; existing exact layouts remain available. Legacy protection is opt-in.
+- Added history, migration, scaling, protection, retry and reconnection tests; updated previews and documentation.
+- Fullscreen exclusive games can still request their own modes. Use borderless and the profile resolution; internal game rendering and unsupported GPU scaling cannot be universally forced.
+
 ## 2.3.0
 
 - Added an optional **Avvia con Windows (minimizzato)** checkbox in the main window and tray menu.

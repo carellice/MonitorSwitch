@@ -11,142 +11,126 @@ namespace MonitorSwitch
         public readonly MonitorSetting Baseline;
         public readonly CheckBox EnabledMonitor;
         public readonly ComboBox Resolution;
-        public bool Editable;
-        public ResolutionRow(MonitorSetting baseline, MonitorInfo monitor, List<string> resolutions)
+        private readonly Label aspect;
+        public readonly string DisplayName;
+        public ResolutionRow(MonitorSetting baseline, string displayName, bool connected, List<string> resolutions)
         {
-            Baseline = baseline.Copy(); Height = 82; Width = 694; Margin = new Padding(0, 0, 0, 8); BackColor = Color.FromArgb(34, 43, 60);
-            EnabledMonitor = new CheckBox { Left = 10, Top = 19, Width = 24, Height = 28 };
-            var name = Theme.Label(baseline.Name, 11, Theme.Text); name.SetBounds(41, 10, 365, 29);
-            var role = Theme.Label(monitor == null ? "Non collegato" : (monitor.Internal ? "Schermo del portatile" : "Monitor esterno"), 9, Theme.Muted); role.SetBounds(41, 43, 350, 26);
-            Resolution = new ComboBox { Left = 414, Top = 10, Width = 251, DropDownStyle = ComboBoxStyle.DropDown };
+            Baseline = baseline.Copy(); DisplayName = displayName; Height = 88; Width = 686; Margin = new Padding(0, 0, 0, 8); BackColor = Color.FromArgb(34, 43, 60);
+            EnabledMonitor = new CheckBox { Left = 10, Top = 24, Width = 24, Height = 28 };
+            var name = Theme.Label(displayName, 11, Theme.Text); name.SetBounds(41, 12, 345, 29);
+            var role = Theme.Label(connected ? "Collegato" : "Scollegato · disponibile quando lo ricolleghi", 9, Theme.Muted); role.SetBounds(41, 47, 360, 28);
+            Resolution = new ComboBox { Left = 413, Top = 12, Width = 249, DropDownStyle = ComboBoxStyle.DropDown };
             foreach (string value in resolutions) Resolution.Items.Add(value);
-            Resolution.Text = baseline.Width + " x " + baseline.Height;
-            double hz = baseline.RefreshDen == 0 ? 0 : (double)baseline.RefreshNum / baseline.RefreshDen;
-            var frequency = Theme.Label(hz.ToString("0.##") + " Hz · frequenza mantenuta", 9, Theme.Muted); frequency.SetBounds(414, 44, 267, 25);
-            Controls.AddRange(new Control[] { EnabledMonitor, name, role, Resolution, frequency });
-            EnabledMonitor.CheckedChanged += delegate { Resolution.Enabled = Editable && EnabledMonitor.Checked; };
+            Resolution.Text = baseline.Width == 0 ? "" : baseline.Width + " x " + baseline.Height;
+            aspect = Theme.Label("", 9, Theme.Muted); aspect.SetBounds(413, 47, 263, 28);
+            Controls.AddRange(new Control[] { EnabledMonitor, name, role, Resolution, aspect });
+            EnabledMonitor.CheckedChanged += delegate { Resolution.Enabled = EnabledMonitor.Checked; };
+            Resolution.TextChanged += delegate { UpdateAspect(); }; UpdateAspect();
+        }
+        private void UpdateAspect()
+        {
+            uint width, height;
+            try { LayoutEditor.Resolution(Resolution.Text, out width, out height); aspect.Text = "Formato " + LayoutEditor.Aspect(width, height) + " · proporzioni mantenute"; }
+            catch { aspect.Text = "Scrivi larghezza x altezza"; }
         }
         public MonitorSetting GetSetting()
         {
             uint width, height; LayoutEditor.Resolution(Resolution.Text, out width, out height);
-            MonitorSetting result = Baseline.Copy();
-            if (result.Width != width || result.Height != height) result.Scaling = 4;
-            result.Width = width; result.Height = height; return result;
+            MonitorSetting result = Baseline.Copy(); result.Scaling = 4; result.Width = width; result.Height = height;
+            if (result.Timing.Active.Width < width || result.Timing.Active.Height < height) result.Timing = new Signal();
+            return result;
         }
+        public override string ToString() { return DisplayName; }
     }
     internal sealed class ProfileDialog : Form
     {
         private readonly TextBox name;
-        private readonly ComboBox mode;
         private readonly ShortcutEditor shortcut;
-        private readonly CheckBox custom;
+        private readonly CheckBox protect;
+        private readonly ComboBox primary;
         private readonly FlowLayoutPanel rowsPanel;
         private readonly List<ResolutionRow> rows = new List<ResolutionRow>();
-        private readonly List<MonitorInfo> monitors;
-        private readonly List<MonitorSetting> current;
         private readonly string id;
-        private List<MonitorSetting> saved;
-        private bool syncing;
         public Profile Result { get; private set; }
-        public ProfileDialog(Profile existing, bool capture, List<MonitorSetting> currentLayout, List<MonitorInfo> inventory = null)
+        public ProfileDialog(Profile existing, bool capture, List<MonitorSetting> currentLayout, List<MonitorInfo> inventory = null, List<MonitorRecord> history = null)
         {
-            Theme.Dialog(this, existing == null ? "Nuovo profilo" : "Modifica profilo", new Size(760, 675));
-            Icon = AppAssets.Icon;
+            Theme.Dialog(this, existing == null ? "Nuovo profilo" : "Modifica profilo", new Size(760, 742)); Icon = AppAssets.Icon;
             id = existing == null ? Guid.NewGuid().ToString("N") : existing.Id;
-            current = currentLayout == null ? new List<MonitorSetting>() : currentLayout.Select(s => s.Copy()).ToList();
-            saved = existing == null ? new List<MonitorSetting>() : existing.Layout.Select(s => s.Copy()).ToList();
-            if (capture) saved = current.Select(s => s.Copy()).ToList();
-            monitors = inventory == null ? new List<MonitorInfo>() : new List<MonitorInfo>(inventory);
-            var nameLabel = Theme.Label("Nome del profilo", 10, Theme.Muted); nameLabel.SetBounds(24, 18, 710, 24);
-            name = new TextBox { Left = 24, Top = 47, Width = 712, MaxLength = 60, Text = existing == null ? (capture ? "La mia configurazione" : "Nuovo profilo") : existing.Name };
-            var modeLabel = Theme.Label("Cosa deve fare", 10, Theme.Muted); modeLabel.SetBounds(24, 89, 710, 24);
-            mode = new ComboBox { Left = 24, Top = 118, Width = 712, DropDownStyle = ComboBoxStyle.DropDownList };
-            foreach (int m in new int[] { 2, 8, 4, 1, 0 }) mode.Items.Add(new ModeChoice { Value = m, Label = Profile.ModeLabel(m) });
-            int chosen = capture ? 0 : (existing == null ? 2 : existing.Mode);
-            mode.SelectedItem = mode.Items.Cast<ModeChoice>().First(m => m.Value == chosen);
-            var keyLabel = Theme.Label("Scorciatoia globale", 10, Theme.Muted); keyLabel.SetBounds(24, 164, 710, 25);
-            shortcut = new ShortcutEditor(existing == null ? new Shortcut() : existing.Hotkey.Clone()); shortcut.SetBounds(24, 197, 712, 36);
-            custom = new CheckBox { Left = 24, Top = 242, Width = 710, Height = 30, Text = "Personalizza monitor e risoluzioni", ForeColor = Theme.Text,
-                Checked = chosen == 0 || (existing != null && existing.CustomResolutions) };
-            rowsPanel = new FlowLayoutPanel { Left = 24, Top = 282, Width = 712, Height = 220, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, BackColor = Theme.Background };
-            var explanation = Theme.Label("Scegli una risoluzione oppure scrivila (es. 1920 x 1080). In duplicazione e comune a tutti gli schermi. Il driver verifica la configurazione prima del cambio.", 9, Theme.Muted);
-            explanation.SetBounds(24, 512, 712, 52);
-            var replace = Theme.Button("Usa la configurazione attuale", false); replace.SetBounds(24, 569, 333, 36); replace.Enabled = current.Count > 0;
-            replace.Click += delegate { saved = current.Select(s => s.Copy()).ToList(); custom.Checked = true; mode.SelectedItem = mode.Items.Cast<ModeChoice>().First(m => m.Value == 0); PopulateRows(); };
-            var save = Theme.Button("Salva profilo", true); save.SetBounds(24, 623, 346, 34);
+            var current = currentLayout ?? new List<MonitorSetting>(); var connected = inventory ?? new List<MonitorInfo>();
+            var known = history == null ? new List<MonitorRecord>() : new List<MonitorRecord>(history);
+            foreach (MonitorInfo monitor in connected)
+                if (!known.Any(m => String.Equals(m.DevicePath, monitor.Key, StringComparison.OrdinalIgnoreCase))) known.Add(new MonitorRecord { DevicePath = monitor.Key, HardwareName = monitor.Name, LastSetting = monitor.Baseline });
+            var saved = existing != null && existing.HasLayout && !capture ? existing.Layout : current;
+            foreach (MonitorSetting setting in saved)
+                if (!known.Any(m => String.Equals(m.DevicePath, setting.DevicePath, StringComparison.OrdinalIgnoreCase))) known.Add(new MonitorRecord { DevicePath = setting.DevicePath, HardwareName = setting.Name, LastSetting = setting });
+            var nameLabel = Theme.Label("Nome del profilo", 10, Theme.Muted); nameLabel.SetBounds(24, 16, 712, 24);
+            name = new TextBox { Left = 24, Top = 44, Width = 712, MaxLength = 60, Text = existing == null ? "Nuovo profilo" : existing.Name };
+            var hint = Theme.Label("Spunta i monitor da accendere e scegli la risoluzione. Gli altri si spengono. Piu monitor selezionati estendono il desktop.", 10, Theme.Muted); hint.SetBounds(24, 86, 712, 46);
+            rowsPanel = new FlowLayoutPanel { Left = 24, Top = 143, Width = 712, Height = 265, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, BackColor = Theme.Background };
+            foreach (MonitorRecord record in known)
+            {
+                MonitorInfo live = connected.FirstOrDefault(m => String.Equals(m.Key, record.DevicePath, StringComparison.OrdinalIgnoreCase));
+                MonitorSetting stored = saved.FirstOrDefault(s => String.Equals(s.DevicePath, record.DevicePath, StringComparison.OrdinalIgnoreCase));
+                MonitorSetting baseline = stored ?? (live == null ? record.LastSetting : live.Baseline);
+                if (baseline == null) baseline = new MonitorSetting { DevicePath = record.DevicePath, Name = record.HardwareName, Rotation = 1, Scaling = 4, RefreshNum = 60, RefreshDen = 1 };
+                var options = new List<string>(record.Resolutions);
+                if (options.Count == 0 && live != null) { try { options = Native.Resolutions(live); } catch { } }
+                string selectedResolution = baseline.Width + " x " + baseline.Height; if (baseline.Width > 0 && !options.Contains(selectedResolution)) options.Insert(0, selectedResolution);
+                var row = new ResolutionRow(baseline, record.DisplayName, live != null, options);
+                row.EnabledMonitor.Checked = stored != null;
+                // Legacy generic profiles become explicit selections when edited.
+                if (existing != null && !existing.HasLayout) row.EnabledMonitor.Checked = live != null && (existing.Mode == 1 ? live.Internal : existing.Mode == 8 ? !live.Internal : true);
+                row.Resolution.Enabled = row.EnabledMonitor.Checked; rows.Add(row); rowsPanel.Controls.Add(row);
+            }
+            if (rows.Count == 0)
+            {
+                var empty = Theme.Label("Nessun monitor nello storico. Collega uno schermo e aggiorna l'elenco.", 10, Theme.Muted); empty.Size = new Size(660, 60); rowsPanel.Controls.Add(empty);
+            }
+            var primaryLabel = Theme.Label("Monitor principale", 10, Theme.Muted); primaryLabel.SetBounds(24, 422, 230, 26);
+            primary = new ComboBox { Left = 254, Top = 419, Width = 482, DropDownStyle = ComboBoxStyle.DropDownList };
+            foreach (ResolutionRow row in rows) row.EnabledMonitor.CheckedChanged += delegate { UpdatePrimary(); };
+            UpdatePrimary();
+            ResolutionRow originalPrimary = rows.FirstOrDefault(r => r.EnabledMonitor.Checked && r.Baseline.X == 0 && r.Baseline.Y == 0); if (originalPrimary != null) primary.SelectedItem = originalPrimary;
+            var keyLabel = Theme.Label("Scorciatoia globale", 10, Theme.Muted); keyLabel.SetBounds(24, 466, 230, 27);
+            shortcut = new ShortcutEditor(existing == null ? new Shortcut() : existing.Hotkey.Clone()); shortcut.SetBounds(254, 462, 482, 36);
+            protect = new CheckBox { Left = 24, Top = 512, Width = 712, Height = 29, Text = "Proteggi la risoluzione mentre il profilo e attivo", ForeColor = Theme.Text, Checked = existing == null || existing.ProtectResolution };
+            var explanation = Theme.Label("Il formato deriva dalla risoluzione; il driver deve mantenere le proporzioni. Nei giochi usa Finestra senza bordi / Borderless e la risoluzione del profilo. Il fullscreen esclusivo puo imporre modalita proprie; la protezione ripristina i cambi rilevati finche l'app resta aperta.", 9, Theme.Muted); explanation.SetBounds(24, 548, 712, 78);
+            var save = Theme.Button("Salva profilo", true); save.SetBounds(24, 681, 346, 37);
             save.Click += delegate
             {
                 try
                 {
-                    int selectedMode = ((ModeChoice)mode.SelectedItem).Value;
-                    var layout = custom.Checked ? LayoutEditor.Build(selectedMode, rows.Where(r => r.EnabledMonitor.Checked).Select(r => r.GetSetting()).ToList()) : new List<MonitorSetting>();
-                    var p = new Profile { Id = id, Name = name.Text.Trim(), Mode = selectedMode, CustomResolutions = custom.Checked && selectedMode != 0,
-                        Hotkey = shortcut.Value, Layout = layout };
+                    ResolutionRow main = primary.SelectedItem as ResolutionRow;
+                    var selected = rows.Where(r => r.EnabledMonitor.Checked).OrderBy(r => r == main ? 0 : 1).Select(r => r.GetSetting()).ToList();
+                    var p = new Profile { Id = id, Name = name.Text.Trim(), Mode = 0, Layout = LayoutEditor.Build(4, selected), Hotkey = shortcut.Value, ProtectResolution = protect.Checked };
                     p.Check(); Result = p; DialogResult = DialogResult.OK; Close();
                 }
                 catch (Exception ex) { MessageBox.Show(this, ex.Message, "Profilo incompleto", MessageBoxButtons.OK, MessageBoxIcon.Information); }
             };
-            var cancel = Theme.Button("Annulla", false); cancel.SetBounds(390, 623, 346, 34); cancel.DialogResult = DialogResult.Cancel; CancelButton = cancel;
-            Controls.AddRange(new Control[] { nameLabel, name, modeLabel, mode, keyLabel, shortcut, custom, rowsPanel, replace, explanation, save, cancel });
-            mode.SelectedIndexChanged += delegate { if (((ModeChoice)mode.SelectedItem).Value == 0) custom.Checked = true; PopulateRows(); };
-            custom.CheckedChanged += delegate
-            {
-                if (((ModeChoice)mode.SelectedItem).Value == 0 && !custom.Checked) { custom.Checked = true; return; }
-                UpdateEnabled();
-            };
-            PopulateRows(); ActiveControl = name;
+            var cancel = Theme.Button("Annulla", false); cancel.SetBounds(390, 681, 346, 37); cancel.DialogResult = DialogResult.Cancel; CancelButton = cancel;
+            Controls.AddRange(new Control[] { nameLabel, name, hint, rowsPanel, primaryLabel, primary, keyLabel, shortcut, protect, explanation, save, cancel }); ActiveControl = name;
         }
-        private void PopulateRows()
+        private void UpdatePrimary()
         {
-            syncing = true;
-            foreach (ResolutionRow row in rows) row.Dispose(); rows.Clear(); rowsPanel.Controls.Clear();
-            int selectedMode = ((ModeChoice)mode.SelectedItem).Value;
-            if (selectedMode == 0 && saved.Count == 0) saved = current.Select(s => s.Copy()).ToList();
-            var keys = monitors.Select(m => m.Key).Concat(saved.Select(s => s.DevicePath)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            int nextGroup = saved.Count == 0 ? 0 : saved.Max(s => s.Group) + 1;
-            int right = saved.Count == 0 ? 0 : saved.Max(s => s.X + (int)s.Width);
-            foreach (string key in keys)
-            {
-                MonitorInfo monitor = monitors.FirstOrDefault(m => String.Equals(m.Key, key, StringComparison.OrdinalIgnoreCase));
-                MonitorSetting stored = saved.FirstOrDefault(s => String.Equals(s.DevicePath, key, StringComparison.OrdinalIgnoreCase));
-                MonitorSetting baseline = stored ?? current.FirstOrDefault(s => String.Equals(s.DevicePath, key, StringComparison.OrdinalIgnoreCase)) ?? (monitor == null ? null : monitor.Baseline);
-                if (baseline == null) continue; baseline = baseline.Copy();
-                if (selectedMode == 0 && stored == null) { baseline.Group = nextGroup++; baseline.X = right; baseline.Y = 0; right += (int)baseline.Width; }
-                List<string> options;
-                try { options = monitor == null ? new List<string>() : Native.Resolutions(monitor); } catch { options = new List<string>(); }
-                if (!options.Contains(baseline.Width + " x " + baseline.Height)) options.Insert(0, baseline.Width + " x " + baseline.Height);
-                var row = new ResolutionRow(baseline, monitor, options);
-                bool include = selectedMode == 0 ? stored != null : monitor != null &&
-                    (selectedMode == 1 ? monitor.Internal : selectedMode == 8 ? !monitor.Internal : true);
-                row.EnabledMonitor.Checked = include;
-                row.Resolution.TextChanged += delegate { Synchronize(row); };
-                rows.Add(row); rowsPanel.Controls.Add(row);
-            }
-            if (selectedMode == 2 && rows.Count > 0)
-            {
-                ResolutionRow first = rows.FirstOrDefault(r => r.EnabledMonitor.Checked);
-                if (first != null) foreach (ResolutionRow row in rows.Where(r => r.EnabledMonitor.Checked)) row.Resolution.Text = first.Resolution.Text;
-            }
-            syncing = false; UpdateEnabled();
+            object selected = primary.SelectedItem; primary.Items.Clear();
+            foreach (ResolutionRow row in rows.Where(r => r.EnabledMonitor.Checked)) primary.Items.Add(row);
+            if (selected != null && primary.Items.Contains(selected)) primary.SelectedItem = selected;
+            else if (primary.Items.Count > 0) primary.SelectedIndex = 0;
         }
-        private void UpdateEnabled()
+    }
+    internal sealed class RenameMonitorDialog : Form
+    {
+        private readonly TextBox alias;
+        public string Alias { get { return alias.Text.Trim(); } }
+        public RenameMonitorDialog(MonitorRecord monitor)
         {
-            int selectedMode = ((ModeChoice)mode.SelectedItem).Value;
-            foreach (ResolutionRow row in rows)
-            {
-                row.Editable = custom.Checked;
-                row.EnabledMonitor.Enabled = custom.Checked && selectedMode == 0;
-                row.Resolution.Enabled = custom.Checked && row.EnabledMonitor.Checked;
-            }
-        }
-        private void Synchronize(ResolutionRow source)
-        {
-            if (syncing) return; int selectedMode = ((ModeChoice)mode.SelectedItem).Value;
-            if (selectedMode != 2 && selectedMode != 0) return;
-            syncing = true;
-            foreach (ResolutionRow row in rows.Where(r => r != source && r.EnabledMonitor.Checked &&
-                (selectedMode == 2 || r.Baseline.Group == source.Baseline.Group))) row.Resolution.Text = source.Resolution.Text;
-            syncing = false;
+            Theme.Dialog(this, "Rinomina monitor", new Size(520, 226)); Icon = AppAssets.Icon;
+            var label = Theme.Label("Nome per ricordarlo (es. TV salotto o Monitor scrivania)", 10, Theme.Muted); label.SetBounds(22, 17, 476, 28);
+            alias = new TextBox { Left = 22, Top = 56, Width = 476, MaxLength = 60, Text = monitor.Alias ?? "" };
+            var model = Theme.Label("Modello: " + monitor.HardwareName + "\r\nLascia vuoto per usare il nome originale.", 9, Theme.Muted); model.SetBounds(22, 98, 476, 50);
+            var save = Theme.Button("Salva nome", true); save.SetBounds(22, 170, 228, 36); save.DialogResult = DialogResult.OK;
+            var cancel = Theme.Button("Annulla", false); cancel.SetBounds(270, 170, 228, 36); cancel.DialogResult = DialogResult.Cancel;
+            Controls.AddRange(new Control[] { label, alias, model, save, cancel }); AcceptButton = save; CancelButton = cancel; ActiveControl = alias;
         }
     }
 }

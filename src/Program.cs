@@ -37,8 +37,10 @@ namespace MonitorSwitch
                 try
                 {
                     DisplayState state = Native.Read(); var monitors = Native.Inventory(state);
+                    var remembered = KnownMonitors.Read();
                     string report = "MonitorSwitch " + Updates.CurrentLabel + "\r\nModalita: " + Profile.ModeLabel(state.Topology()) + "\r\n" +
                         String.Join("\r\n", monitors.Select(m => m.Name + " | " + m.Summary + " | " + m.Adapter + " | " + m.Key + "\r\nRisoluzioni: " + String.Join(", ", Native.Resolutions(m))));
+                    report += "\r\nMonitor ricordati da Windows: " + remembered.Count + "\r\nIdentita dei monitor collegati presenti nello storico Windows: " + monitors.Count(m => remembered.Any(r => String.Equals(r.DevicePath, m.Key, StringComparison.OrdinalIgnoreCase))) + "/" + monitors.Count;
                     if (args[0] == "--validate-current" || args[0] == "--validate-editor")
                     {
                         File.WriteAllText(args[1], report + "\r\nVerifica in corso...");
@@ -56,10 +58,13 @@ namespace MonitorSwitch
                         }
                         Native.Plan(Native.BuildPlan(LayoutEditor.Build(4, extended), monitors), true);
                         report += "\r\nEditor: estensione con risoluzioni native distinte validata senza applicare modifiche.";
-                        var clone = monitors.Select(m => m.Baseline.Copy()).ToList();
-                        foreach (var setting in clone) { setting.Width = 1920; setting.Height = 1080; setting.Scaling = 4; }
-                        Native.Plan(Native.BuildPlan(LayoutEditor.Build(2, clone), monitors), true);
-                        report += "\r\nEditor: duplicazione 1920 x 1080 validata senza applicare modifiche.";
+                        foreach (MonitorInfo monitor in monitors)
+                        {
+                            MonitorSetting selection = monitor.Baseline.Copy(); selection.Group = 0; selection.X = selection.Y = 0; selection.Scaling = 4;
+                            if (monitor.PreferredWidth >= 1920 && monitor.PreferredHeight >= 1080) { selection.Width = 1920; selection.Height = 1080; }
+                            Native.Plan(Native.BuildPlan(new List<MonitorSetting> { selection }, monitors), true);
+                        }
+                        report += "\r\nEditor: profili per singolo monitor con proporzioni mantenute validati senza applicare modifiche.";
                     }
                     File.WriteAllText(args[1], report);
                     return 0;
@@ -85,6 +90,7 @@ namespace MonitorSwitch
                     new MonitorSetting { DevicePath = "external", Name = "ZQE-CAA", Group = 0, Width = 1920, Height = 1080, Rotation = 1, Scaling = 4, RefreshNum = 165, RefreshDen = 1 } };
                 var inventory = layout.Select(s => new MonitorInfo { Key = s.DevicePath, Name = s.Name, Internal = s.DevicePath == "panel", Baseline = s }).ToList();
                 var sample = new Profile { Id = Guid.NewGuid().ToString("N"), Name = "Gioco", Mode = 2, CustomResolutions = true, Layout = layout };
+                using (var form = new RenameMonitorDialog(new MonitorRecord { HardwareName = "ZQE-CAA", Alias = "Monitor scrivania" })) Render(form, Path.Combine(args[1], "rename-dialog.png"));
                 using (var form = new ProfileDialog(sample, false, layout, inventory)) Render(form, Path.Combine(args[1], "profile-dialog.png"));
                 using (var form = new ShortcutDialog(new Shortcut { Modifiers = 3, Key = 121 })) Render(form, Path.Combine(args[1], "shortcut-dialog.png"));
                 using (var form = new ConfirmDialog("Gioco", Stopwatch.StartNew())) Render(form, Path.Combine(args[1], "confirmation-dialog.png"));
@@ -144,11 +150,12 @@ namespace MonitorSwitch
         private List<MonitorInfo> monitors = new List<MonitorInfo>();
         private readonly ListView profileList;
         private readonly DataGridView monitorGrid;
-        private readonly Label status, currentMode, selectedDescription, switchHint;
-        private readonly ComboBox pairA, pairB;
-        private readonly Button switchButton;
+        private readonly Label status, currentMode, selectedDescription, protectionStatus;
         private readonly NotifyIcon tray;
-        private readonly System.Windows.Forms.Timer refreshTimer;
+        private readonly System.Windows.Forms.Timer refreshTimer, protectionTimer;
+        private readonly ProfileProtection protection = new ProfileProtection();
+        private bool historyInitialized;
+        private string trayActiveId, historyFingerprint;
         private readonly Dictionary<int, string> hotkeys = new Dictionary<int, string>();
         private bool loading, changing, updating;
         private UpdateInfo availableUpdate;
@@ -159,147 +166,130 @@ namespace MonitorSwitch
         [DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr h, int id);
         public MainForm(bool isPreview, bool startInTray = false)
         {
-            initialTray = startInTray;
-            preview = isPreview; bool firstLaunch = !preview && !File.Exists(ProfileStore.FileName);
-            settings = preview ? Settings.Defaults() : ProfileStore.Load(ProfileStore.FileName);
-            Text = "Monitor Switch"; ClientSize = new Size(1040, 770); MinimumSize = new Size(960, 772);
+            initialTray = startInTray; preview = isPreview;
+            settings = preview ? PreviewSettings() : ProfileStore.Load(ProfileStore.FileName);
+            Text = "MonitorSwitch"; ClientSize = new Size(1180, 760); MinimumSize = new Size(1100, 720);
             StartPosition = FormStartPosition.CenterScreen; AutoScaleDimensions = new SizeF(96, 96); AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Segoe UI", 10); BackColor = Theme.Background; ForeColor = Theme.Text; Icon = AppAssets.Icon;
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24, 16, 24, 12), ColumnCount = 1, RowCount = 7 };
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 51));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 16));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 158)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 43)); Controls.Add(root);
-            var heading = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty, Padding = new Padding(0, 0, 0, 12) };
-            var title = Theme.Label("Monitor Switch", 25, Theme.Text); title.AutoSize = true; title.Margin = Padding.Empty;
-            var subtitle = Theme.Label("Una configurazione per giocare. Un'altra per tutto il resto.", 10, Theme.Muted); subtitle.AutoSize = true; subtitle.Margin = new Padding(2, 4, 0, 0);
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24, 18, 24, 12), ColumnCount = 1, RowCount = 6 };
+            foreach (float height in new float[] { 76, 96, 0, 48, 32, 43 }) root.RowStyles.Add(height == 0 ? new RowStyle(SizeType.Percent, 100) : new RowStyle(SizeType.Absolute, height));
+            Controls.Add(root);
+            var heading = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
+            var title = Theme.Label("I tuoi monitor, i tuoi profili", 23, Theme.Text); title.SetBounds(0, 0, 720, 42);
+            var subtitle = Theme.Label("Ritrova ogni schermo. Scegli dove giocare e lavorare, alla risoluzione che vuoi.", 10, Theme.Muted); subtitle.SetBounds(2, 45, 810, 25);
             heading.Controls.AddRange(new Control[] { title, subtitle }); root.Controls.Add(heading, 0, 0);
-            var quick = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
-            string[] labels = { "Duplica", "Estendi", "Solo portatile", "Solo esterni" }; int[] values = { 2, 4, 1, 8 };
-            for (int i = 0; i < labels.Length; i++)
-            {
-                int mode = values[i]; var b = Theme.Button(labels[i], false); b.Width = 139;
-                b.Click += delegate { ApplyProfile(new Profile { Id = Guid.NewGuid().ToString("N"), Name = Profile.ModeLabel(mode), Mode = mode }); }; quick.Controls.Add(b);
-            }
-            var windows = Theme.Button("Impostazioni Windows ↗", false); windows.Width = 217; windows.Click += delegate { OpenSettings(); }; quick.Controls.Add(windows);
-            root.Controls.Add(quick, 0, 1);
+            var activeCard = new Panel { Width = 1132, Dock = DockStyle.Fill, BackColor = Theme.Card, Margin = new Padding(0, 6, 0, 12) };
+            currentMode = Theme.Label("Nessun profilo attivo", 15, Theme.Text); currentMode.SetBounds(16, 10, 850, 30); currentMode.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            protectionStatus = Theme.Label("Applica un profilo per proteggere la risoluzione.", 9, Theme.Muted); protectionStatus.SetBounds(16, 43, 860, 26); protectionStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            var deactivate = Theme.Button("Disattiva profilo", false); deactivate.Width = 170; deactivate.Height = 38; deactivate.Location = new Point(activeCard.Width - 186, 18); deactivate.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            deactivate.Click += delegate { DeactivateProfile(); };
+            activeCard.Controls.AddRange(new Control[] { currentMode, protectionStatus, deactivate }); root.Controls.Add(activeCard, 0, 1);
             var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty };
-            body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 330)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 16)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            root.Controls.Add(body, 0, 2);
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 402)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 16)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); root.Controls.Add(body, 0, 2);
             var profiles = new TableLayoutPanel { BackColor = Theme.Card, Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 6, Margin = Padding.Empty };
-            foreach (float height in new float[] { 32, 0, 43, 43, 43, 40 }) profiles.RowStyles.Add(height == 0 ? new RowStyle(SizeType.Percent, 100) : new RowStyle(SizeType.Absolute, height));
-            var profileTitle = Theme.Label("I tuoi profili", 14, Theme.Text); profileTitle.Dock = DockStyle.Fill; profiles.Controls.Add(profileTitle, 0, 0);
+            foreach (float height in new float[] { 34, 0, 67, 44, 44, 40 }) profiles.RowStyles.Add(height == 0 ? new RowStyle(SizeType.Percent, 100) : new RowStyle(SizeType.Absolute, height));
+            var profileTitle = Theme.Label("Profili", 14, Theme.Text); profileTitle.Dock = DockStyle.Fill; profiles.Controls.Add(profileTitle, 0, 0);
             profileList = new ListView { View = View.Details, FullRowSelect = true, HideSelection = false, MultiSelect = false, Dock = DockStyle.Fill,
                 BackColor = Theme.Card, ForeColor = Theme.Text, BorderStyle = BorderStyle.None, HeaderStyle = ColumnHeaderStyle.Nonclickable };
-            profileList.Columns.Add("Profilo", 164); profileList.Columns.Add("Scorciatoia", 116);
+            profileList.Columns.Add("Nome", 153); profileList.Columns.Add("Stato", 91); profileList.Columns.Add("Scorciatoia", 120);
             profileList.SelectedIndexChanged += delegate { UpdateSelected(); }; profileList.DoubleClick += delegate { ApplySelected(); }; profiles.Controls.Add(profileList, 0, 1);
-            selectedDescription = Theme.Label("Seleziona un profilo.", 9, Theme.Muted); selectedDescription.Dock = DockStyle.Fill; selectedDescription.Padding = new Padding(0, 7, 0, 0); profiles.Controls.Add(selectedDescription, 0, 2);
-            var apply = Theme.Button("Applica profilo selezionato", true); apply.Dock = DockStyle.Fill; apply.Margin = new Padding(0, 3, 0, 3); apply.Click += delegate { ApplySelected(); }; profiles.Controls.Add(apply, 0, 3);
+            selectedDescription = Theme.Label("Crea il tuo primo profilo.", 9, Theme.Muted); selectedDescription.Dock = DockStyle.Fill; selectedDescription.Padding = new Padding(0, 8, 0, 0); profiles.Controls.Add(selectedDescription, 0, 2);
+            var apply = Theme.Button("Attiva profilo selezionato", true); apply.Dock = DockStyle.Fill; apply.Margin = new Padding(0, 3, 0, 3); apply.Click += delegate { ApplySelected(); }; profiles.Controls.Add(apply, 0, 3);
             var editRow = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, WrapContents = false };
-            var add = Theme.Button("Nuovo", false); add.Width = 88; add.Click += delegate { EditProfile(false, false); };
-            var edit = Theme.Button("Modifica", false); edit.Width = 92; edit.Click += delegate { EditProfile(true, false); };
-            var remove = Theme.Button("Elimina", false); remove.Width = 88; remove.Click += delegate { DeleteProfile(); };
+            var add = Theme.Button("Nuovo", false); add.Width = 112; add.Click += delegate { EditProfile(false, false); };
+            var edit = Theme.Button("Modifica", false); edit.Width = 112; edit.Click += delegate { EditProfile(true, false); };
+            var remove = Theme.Button("Elimina", false); remove.Width = 112; remove.Click += delegate { DeleteProfile(); };
             editRow.Controls.AddRange(new Control[] { add, edit, remove }); profiles.Controls.Add(editRow, 0, 4);
-            var capture = Theme.Button("＋ Salva configurazione attuale", false); capture.Font = new Font("Segoe UI", 9); capture.Dock = DockStyle.Fill; capture.Margin = new Padding(0, 3, 0, 0);
+            var capture = Theme.Button("Salva configurazione attuale", false); capture.Font = new Font("Segoe UI", 9); capture.Dock = DockStyle.Fill; capture.Margin = new Padding(0, 3, 0, 0);
             capture.Click += delegate { EditProfile(false, true); }; profiles.Controls.Add(capture, 0, 5); body.Controls.Add(profiles, 0, 0);
             var displayPanel = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Card, Padding = new Padding(16), ColumnCount = 1, RowCount = 4, Margin = Padding.Empty };
-            displayPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35)); displayPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35));
-            displayPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); displayPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
-            var displayTitle = Theme.Label("Monitor riconosciuti", 14, Theme.Text); displayTitle.Dock = DockStyle.Fill; displayPanel.Controls.Add(displayTitle, 0, 0);
-            currentMode = Theme.Label("Rilevamento monitor…", 10, Theme.Muted); currentMode.Dock = DockStyle.Fill; displayPanel.Controls.Add(currentMode, 0, 1);
+            displayPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35)); displayPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 47)); displayPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); displayPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+            var displayTitle = Theme.Label("Storico monitor", 14, Theme.Text); displayTitle.Dock = DockStyle.Fill; displayPanel.Controls.Add(displayTitle, 0, 0);
+            var historyHint = Theme.Label("Anche gli schermi scollegati restano qui. Seleziona un monitor per rinominarlo; il nome vale per tutti i profili.", 9, Theme.Muted); historyHint.Dock = DockStyle.Fill; displayPanel.Controls.Add(historyHint, 0, 1);
             monitorGrid = new DataGridView { Dock = DockStyle.Fill, BackgroundColor = Theme.Card, BorderStyle = BorderStyle.None, ReadOnly = true,
-                AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false, RowHeadersVisible = false,
+                AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false, RowHeadersVisible = false, MultiSelect = false,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal, GridColor = Color.FromArgb(48, 58, 78), EnableHeadersVisualStyles = false };
-            monitorGrid.DefaultCellStyle.BackColor = Theme.Card; monitorGrid.DefaultCellStyle.ForeColor = Theme.Text;
-            monitorGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(51, 58, 87); monitorGrid.DefaultCellStyle.SelectionForeColor = Theme.Text;
+            monitorGrid.DefaultCellStyle.BackColor = Theme.Card; monitorGrid.DefaultCellStyle.ForeColor = Theme.Text; monitorGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(51, 58, 87); monitorGrid.DefaultCellStyle.SelectionForeColor = Theme.Text;
             monitorGrid.DefaultCellStyle.WrapMode = DataGridViewTriState.True; monitorGrid.DefaultCellStyle.Font = new Font("Segoe UI", 9);
-            monitorGrid.ColumnHeadersDefaultCellStyle.BackColor = Theme.Card; monitorGrid.ColumnHeadersDefaultCellStyle.ForeColor = Theme.Muted;
-            monitorGrid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9); monitorGrid.ColumnHeadersHeight = 32; monitorGrid.RowTemplate.Height = 70;
-            monitorGrid.Columns.Add("monitor", "Monitor"); monitorGrid.Columns.Add("state", "Stato / risoluzione"); monitorGrid.Columns.Add("gpu", "GPU uscita");
-            monitorGrid.Columns[0].FillWeight = 95; monitorGrid.Columns[1].FillWeight = 135; monitorGrid.Columns[2].FillWeight = 100; displayPanel.Controls.Add(monitorGrid, 0, 2);
+            monitorGrid.ColumnHeadersDefaultCellStyle.BackColor = Theme.Card; monitorGrid.ColumnHeadersDefaultCellStyle.ForeColor = Theme.Muted; monitorGrid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9); monitorGrid.ColumnHeadersHeight = 32; monitorGrid.RowTemplate.Height = 76;
+            monitorGrid.Columns.Add("monitor", "Nome / modello"); monitorGrid.Columns.Add("state", "Collegamento"); monitorGrid.Columns.Add("resolution", "Risoluzione / formato"); monitorGrid.Columns.Add("seen", "Ultimo rilevamento");
+            monitorGrid.Columns[0].FillWeight = 110; monitorGrid.Columns[1].FillWeight = 90; monitorGrid.Columns[2].FillWeight = 115; monitorGrid.Columns[3].FillWeight = 85;
+            monitorGrid.CellDoubleClick += delegate(object sender, DataGridViewCellEventArgs e) { if (e.RowIndex >= 0) RenameMonitor(); }; displayPanel.Controls.Add(monitorGrid, 0, 2);
             var displayFooter = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty, Padding = new Padding(0, 8, 0, 0) };
-            var refresh = Theme.Button("Aggiorna monitor", false); refresh.Width = 158; refresh.Click += delegate { RefreshDisplays(true); };
-            var help = Theme.Button("Come funziona", false); help.Width = 151; help.Click += delegate { ShowHelp(); };
-            var updates = Theme.Button("Aggiornamenti", false); updates.Width = 150; updates.Click += delegate { ShowUpdates(); };
-            displayFooter.Controls.AddRange(new Control[] { refresh, help, updates }); displayPanel.Controls.Add(displayFooter, 0, 3); body.Controls.Add(displayPanel, 2, 0);
-            var switchCard = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Card, Padding = new Padding(16, 10, 16, 10), ColumnCount = 2, RowCount = 3, Margin = Padding.Empty };
-            switchCard.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); switchCard.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 290));
-            switchCard.RowStyles.Add(new RowStyle(SizeType.Absolute, 33)); switchCard.RowStyles.Add(new RowStyle(SizeType.Absolute, 45)); switchCard.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            var switchTitle = Theme.Label("Il tuo interruttore", 14, Theme.Text); switchTitle.Dock = DockStyle.Fill; switchCard.Controls.Add(switchTitle, 0, 0);
-            var pair = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty };
-            pair.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); pair.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 38)); pair.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            pairA = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 4, 0, 0) };
-            pairB = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 4, 18, 0) };
-            var arrow = Theme.Label("⇄", 17, Theme.Muted); arrow.Dock = DockStyle.Fill; arrow.TextAlign = ContentAlignment.TopCenter;
-            pair.Controls.Add(pairA, 0, 0); pair.Controls.Add(arrow, 1, 0); pair.Controls.Add(pairB, 2, 0); switchCard.Controls.Add(pair, 0, 1);
-            pairA.SelectedIndexChanged += PairChanged; pairB.SelectedIndexChanged += PairChanged;
-            switchHint = Theme.Label("", 9, Theme.Muted); switchHint.Dock = DockStyle.Fill; switchCard.Controls.Add(switchHint, 0, 2);
-            switchButton = Theme.Button("Cambia configurazione", true); switchButton.Dock = DockStyle.Fill; switchButton.Margin = new Padding(4, 2, 0, 2); switchButton.Click += delegate { TogglePair(); };
-            switchCard.Controls.Add(switchButton, 1, 0); switchCard.SetRowSpan(switchButton, 2);
-            var shortcut = Theme.Button("Personalizza tasto rapido", false); shortcut.Font = new Font("Segoe UI", 9); shortcut.Dock = DockStyle.Fill; shortcut.Margin = new Padding(4, 2, 0, 0);
-            shortcut.Click += delegate { EditSwitchKey(); }; switchCard.Controls.Add(shortcut, 1, 2); root.Controls.Add(switchCard, 0, 4);
-            var bottom = new Panel { Dock = DockStyle.Fill };
-            status = Theme.Label("Pronto. Le modifiche confermate restano attive anche chiudendo l'app.", 9, Theme.Muted); status.Dock = DockStyle.Fill; status.Padding = new Padding(0, 10, 0, 0);
-            var ask = new CheckBox { Text = "Conferma dopo il cambio", Checked = settings.ConfirmChanges, Dock = DockStyle.Right, Width = 235, Font = new Font("Segoe UI", 9), ForeColor = Theme.Muted };
-            ask.CheckedChanged += delegate { settings.ConfirmChanges = ask.Checked; if (!preview) SaveSettings(); status.Text = ask.Checked ? "Conferma entro 20 secondi; senza conferma il cambio viene annullato." : "Cambio immediato attivo: le configurazioni riuscite vengono mantenute subito."; };
-            bottom.Controls.Add(status); bottom.Controls.Add(ask); root.Controls.Add(bottom, 0, 6);
+            var rename = Theme.Button("Rinomina", false); rename.Width = 120; rename.Click += delegate { RenameMonitor(); };
+            var refresh = Theme.Button("Aggiorna", false); refresh.Width = 120; refresh.Click += delegate { RefreshDisplays(true); };
+            var windows = Theme.Button("Schermi Windows ↗", false); windows.Width = 182; windows.Click += delegate { OpenSettings(); };
+            displayFooter.Controls.AddRange(new Control[] { rename, refresh, windows }); displayPanel.Controls.Add(displayFooter, 0, 3); body.Controls.Add(displayPanel, 2, 0);
+            var toolbar = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, Padding = new Padding(0, 8, 0, 0) };
+            var help = Theme.Button("Come funziona", false); help.Width = 160; help.Click += delegate { ShowHelp(); };
+            var updates = Theme.Button("Aggiornamenti", false); updates.Width = 160; updates.Click += delegate { ShowUpdates(); };
+            toolbar.Controls.AddRange(new Control[] { help, updates }); root.Controls.Add(toolbar, 0, 3);
             startWithWindows = new CheckBox { Text = "Avvia con Windows (minimizzato)", AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Theme.Muted, Font = new Font("Segoe UI", 9) };
-            if (!preview) { try { startWithWindows.Checked = Startup.Enabled; } catch (Exception ex) { Recovery.Log(ex); status.Text = "Impossibile leggere l'avvio con Windows: " + ex.Message; } }
-            startWithWindows.CheckedChanged += delegate { SetStartup(startWithWindows.Checked); };
-            root.Controls.Add(startWithWindows, 0, 5);
-            tray = new NotifyIcon { Text = "Monitor Switch", Icon = AppAssets.TrayIcon, Visible = !preview }; tray.DoubleClick += delegate { ShowWindow(); };
-            refreshTimer = new System.Windows.Forms.Timer { Interval = 500 }; refreshTimer.Tick += delegate { refreshTimer.Stop(); if (!changing) RefreshDisplays(false); };
+            if (!preview) { try { startWithWindows.Checked = Startup.Enabled; } catch (Exception ex) { Recovery.Log(ex); } }
+            startWithWindows.CheckedChanged += delegate { SetStartup(startWithWindows.Checked); }; root.Controls.Add(startWithWindows, 0, 4);
+            var bottom = new Panel { Dock = DockStyle.Fill };
+            status = Theme.Label("Pronto. Crea un profilo scegliendo monitor e risoluzioni.", 9, Theme.Muted); status.Dock = DockStyle.Fill; status.Padding = new Padding(0, 10, 0, 0);
+            var ask = new CheckBox { Text = "Conferma dopo il cambio", Checked = settings.ConfirmChanges, Dock = DockStyle.Right, Width = 235, Font = new Font("Segoe UI", 9), ForeColor = Theme.Muted };
+            ask.CheckedChanged += delegate { settings.ConfirmChanges = ask.Checked; if (!preview) SaveSettings(); }; bottom.Controls.Add(status); bottom.Controls.Add(ask); root.Controls.Add(bottom, 0, 5);
+            tray = new NotifyIcon { Text = "MonitorSwitch", Icon = AppAssets.TrayIcon, Visible = !preview }; tray.DoubleClick += delegate { ShowWindow(); };
+            refreshTimer = new System.Windows.Forms.Timer { Interval = 500 }; refreshTimer.Tick += delegate { refreshTimer.Stop(); if (!changing) { RefreshDisplays(false); ProtectProfile(); } };
+            protectionTimer = new System.Windows.Forms.Timer { Interval = 1500 }; protectionTimer.Tick += delegate { if (!changing && !updating && protection.State != ProtectionState.Conflict && settings.Profiles.Any(p => p.Id == settings.ActiveProfileId && p.ProtectResolution)) { RefreshDisplays(false); ProtectProfile(); } };
             Resize += delegate { if (!preview && WindowState == FormWindowState.Minimized) Hide(); };
             FormClosing += delegate(object sender, FormClosingEventArgs e) { if (changing) { e.Cancel = true; if (confirmation != null) confirmation.CancelChange(); } };
             RebuildProfiles(null);
-            if (preview) PreviewMonitors(); else RefreshDisplays(false);
-            if (firstLaunch)
+            if (preview)
             {
-                // Preserve the user's already working gaming setup on first launch.
-                if (state != null && state.Topology() == 2)
-                {
-                    try
-                    {
-                        settings.Profiles[0].Layout = state.Capture(monitors); settings.Profiles[0].Mode = 0;
-                        RebuildProfiles(settings.Profiles[0].Id); status.Text = "Gioco acquisito dalla duplicazione attuale. Lavoro passa al monitor esterno.";
-                    }
-                    catch (Exception ex) { Recovery.Log(ex); }
-                }
-                ProfileStore.Save(ProfileStore.FileName, settings);
+                monitors = settings.Monitors.Take(2).Select(r => new MonitorInfo { Key = r.DevicePath, Name = r.HardwareName, Internal = r.Internal, Active = !r.Internal, Baseline = r.LastSetting.Copy(), Width = r.LastSetting.Width, Height = r.LastSetting.Height }).ToList();
+                RenderHistory(); UpdateActiveProfile();
+            }
+            else
+            {
+                RefreshDisplays(false);
+                // Restart protection only when the saved profile is actually active.
+                if (!String.IsNullOrEmpty(settings.ActiveProfileId) && !Matches(settings.Profiles.FirstOrDefault(p => p.Id == settings.ActiveProfileId))) { settings.ActiveProfileId = null; SaveSettings(); }
+                UpdateActiveProfile(); protectionTimer.Start();
             }
         }
         private Profile Selected { get { return profileList.SelectedItems.Count == 0 ? null : (Profile)profileList.SelectedItems[0].Tag; } }
         private void RebuildProfiles(string selected)
         {
-            loading = true; profileList.Items.Clear(); pairA.Items.Clear(); pairB.Items.Clear();
+            loading = true; profileList.Items.Clear();
             foreach (Profile p in settings.Profiles)
             {
-                var item = new ListViewItem(new string[] { p.Name, p.Hotkey.Label }) { Tag = p }; profileList.Items.Add(item);
-                pairA.Items.Add(p); pairB.Items.Add(p); if (p.Id == settings.SwitchA) pairA.SelectedItem = p; if (p.Id == settings.SwitchB) pairB.SelectedItem = p;
+                var item = new ListViewItem(new string[] { p.Name, "", p.Hotkey.Label }) { Tag = p }; profileList.Items.Add(item);
                 if (p.Id == selected) item.Selected = true;
             }
             if (profileList.SelectedItems.Count == 0 && profileList.Items.Count > 0) profileList.Items[0].Selected = true;
-            loading = false; UpdateSelected(); UpdateSwitch(); RebuildTray();
+            loading = false; UpdateSelected(); UpdateActiveProfile(); RebuildTray();
             if (IsHandleCreated && !preview) RegisterShortcuts();
         }
         private void UpdateSelected()
-        { Profile p = Selected; selectedDescription.Text = p == null ? "Seleziona un profilo." : p.Description + (p.HasLayout ? " · " + p.Layout.Count + " monitor" : ""); }
+        {
+            Profile p = Selected;
+            selectedDescription.Text = p == null ? "Crea un profilo e scegli gli schermi da usare." : !p.HasLayout ? p.Description :
+                String.Join("\r\n", p.Layout.Take(2).Select(m => MonitorHistory.Name(settings, m.DevicePath, m.Name) + " · " + m.Width + " × " + m.Height + " (" + LayoutEditor.Aspect(m.Width, m.Height) + ")")) + (p.Layout.Count > 2 ? " · altri " + (p.Layout.Count - 2) : "");
+        }
         private void RebuildTray()
         {
+            if (tray == null) return;
             ContextMenuStrip old = tray.ContextMenuStrip; var menu = new ContextMenuStrip();
-            menu.Items.Add("Apri Monitor Switch", null, delegate { ShowWindow(); });
-            menu.Items.Add("Interruttore: " + settings.SwitchHotkey.Label, null, delegate { TogglePair(true); }); menu.Items.Add(new ToolStripSeparator());
-            foreach (Profile profile in settings.Profiles) { Profile p = profile; menu.Items.Add(p.Name + "  (" + p.Hotkey.Label + ")", null, delegate { ApplyProfile(p, true); }); }
-            menu.Items.Add(new ToolStripSeparator()); menu.Items.Add("Esci", null, delegate { Close(); }); tray.ContextMenuStrip = menu; if (old != null) old.Dispose();
-            menu.Items.Insert(menu.Items.Count - 1, new ToolStripMenuItem("Aggiornamenti…", null, delegate { ShowUpdates(); }));
+            menu.Items.Add("Apri MonitorSwitch", null, delegate { ShowWindow(); });
+            Profile active = ActiveProfile; trayActiveId = active == null ? "" : active.Id;
+            menu.Items.Add(active == null ? "Nessun profilo attivo" : "Attivo: " + active.Name).Enabled = false;
+            foreach (Profile profile in settings.Profiles)
+            {
+                Profile p = profile;
+                var item = new ToolStripMenuItem(p.Name + (p.Hotkey.Key == 0 ? "" : "  (" + p.Hotkey.Label + ")"), null, delegate { ApplyProfile(p, true); }) { Checked = active != null && active.Id == p.Id };
+                menu.Items.Add(item);
+            }
+            menu.Items.Add("Disattiva profilo", null, delegate { DeactivateProfile(); }); menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Aggiornamenti…", null, delegate { ShowUpdates(); });
             var automatic = new ToolStripMenuItem("Controlla aggiornamenti all'avvio") { Checked = settings.CheckUpdatesOnStartup, CheckOnClick = true };
-            automatic.CheckedChanged += delegate { settings.CheckUpdatesOnStartup = automatic.Checked; SaveSettings(); };
-            menu.Items.Insert(menu.Items.Count - 1, automatic);
+            automatic.CheckedChanged += delegate { settings.CheckUpdatesOnStartup = automatic.Checked; SaveSettings(); }; menu.Items.Add(automatic);
             var startup = new ToolStripMenuItem("Avvia con Windows (minimizzato)") { Checked = startWithWindows.Checked, Enabled = !preview };
-            startup.Click += delegate { startWithWindows.Checked = !startWithWindows.Checked; };
-            menu.Items.Insert(menu.Items.Count - 1, startup);
+            startup.Click += delegate { startWithWindows.Checked = !startWithWindows.Checked; }; menu.Items.Add(startup);
+            menu.Items.Add("Esci", null, delegate { Close(); }); tray.ContextMenuStrip = menu; if (old != null) old.Dispose();
         }
         private void SetStartup(bool enabled)
         {
@@ -378,7 +368,6 @@ namespace MonitorSwitch
         {
             foreach (int id in hotkeys.Keys) UnregisterHotKey(Handle, id); hotkeys.Clear(); var occupied = new List<string>(); int keyId = 1;
             foreach (Profile p in settings.Profiles) RegisterShortcut(keyId++, p.Id, p.Hotkey, occupied);
-            RegisterShortcut(keyId, "switch", settings.SwitchHotkey, occupied);
             if (occupied.Count != 0) status.Text = "Scorciatoie occupate: " + String.Join(", ", occupied) + ". Puoi cambiarle o usare i pulsanti.";
         }
         private void RegisterShortcut(int id, string value, Shortcut key, List<string> occupied)
@@ -392,58 +381,151 @@ namespace MonitorSwitch
             {
                 string value;
                 if (hotkeys.TryGetValue(m.WParam.ToInt32(), out value))
-                { if (value == "switch") TogglePair(true); else { Profile p = settings.Profiles.FirstOrDefault(x => x.Id == value); if (p != null) ApplyProfile(p, true); } }
+                { Profile p = settings.Profiles.FirstOrDefault(x => x.Id == value); if (p != null) ApplyProfile(p, true); }
             }
             if ((m.Msg == 0x7E || m.Msg == 0x219) && refreshTimer != null && !preview && !changing) { refreshTimer.Stop(); refreshTimer.Start(); }
             base.WndProc(ref m);
         }
-        private void PreviewMonitors()
+        private static Settings PreviewSettings()
         {
-            currentMode.Text = "Attuale: solo monitor esterno";
-            monitorGrid.Rows.Add("Schermo portatile", "Portatile\r\nCollegato, non attivo", "Intel(R) Graphics");
-            monitorGrid.Rows.Add("ZQE-CAA", "Esterno · attivo\r\n3440 × 1440 · 120 Hz", "Intel(R) Graphics");
+            var sample = Settings.Defaults();
+            var screen = new MonitorSetting { DevicePath = "external", Name = "ZQE-CAA", Group = 0, Width = 1920, Height = 1080, Rotation = 1, Scaling = 4, RefreshNum = 120, RefreshDen = 1 };
+            sample.Profiles.Add(new Profile { Id = Guid.NewGuid().ToString("N"), Name = "Gioco 16:9", Mode = 0, Layout = new List<MonitorSetting> { screen }, Hotkey = new Shortcut { Modifiers = 3, Key = 112 } });
+            var work = screen.Copy(); work.Width = 3440; work.Height = 1440;
+            sample.ActiveProfileId = sample.Profiles[0].Id;
+            sample.Profiles.Add(new Profile { Id = Guid.NewGuid().ToString("N"), Name = "Lavoro ultrawide", Mode = 0, Layout = new List<MonitorSetting> { work }, Hotkey = new Shortcut { Modifiers = 3, Key = 113 } });
+            sample.Monitors.Add(new MonitorRecord { DevicePath = "external", HardwareName = "ZQE-CAA", Alias = "Monitor scrivania", LastSetting = screen, LastSeenUtc = DateTime.UtcNow.ToString("o") });
+            var panel = screen.Copy(); panel.DevicePath = "panel"; panel.Name = "Schermo del portatile";
+            sample.Monitors.Add(new MonitorRecord { DevicePath = "panel", HardwareName = "Schermo del portatile", Alias = "Portatile", Internal = true, LastSetting = panel, LastSeenUtc = DateTime.UtcNow.ToString("o") });
+            sample.Monitors.Add(new MonitorRecord { DevicePath = "tv", HardwareName = "LG TV", Alias = "TV salotto", LastSetting = new MonitorSetting { DevicePath = "tv", Name = "LG TV", Width = 3840, Height = 2160, Rotation = 1, Scaling = 4, RefreshNum = 60, RefreshDen = 1 }, LastSeenUtc = DateTime.UtcNow.AddDays(-3).ToString("o") });
+            return sample;
+        }
+        private void RenderHistory()
+        {
+            string fingerprint = String.Join("|", settings.Monitors.Select(r => r.DevicePath + ":" + r.DisplayName + ":" + r.HardwareName + ":" + r.LastSeenUtc + ":" + (r.LastSetting == null ? "" : r.LastSetting.Width + "x" + r.LastSetting.Height))) +
+                String.Join("|", monitors.Select(m => m.Key + ":" + m.Active + ":" + m.Width + "x" + m.Height));
+            if (fingerprint == historyFingerprint) return; historyFingerprint = fingerprint;
+            int scroll = monitorGrid.FirstDisplayedScrollingRowIndex;
+            string selected = monitorGrid.CurrentRow == null ? null : monitorGrid.CurrentRow.Tag as string;
+            monitorGrid.Rows.Clear();
+            foreach (MonitorRecord record in settings.Monitors.OrderByDescending(r => monitors.Any(m => String.Equals(m.Key, r.DevicePath, StringComparison.OrdinalIgnoreCase))).ThenBy(r => r.DisplayName))
+            {
+                MonitorInfo live = monitors.FirstOrDefault(m => String.Equals(m.Key, record.DevicePath, StringComparison.OrdinalIgnoreCase));
+                string connection = live == null ? "Scollegato" : live.Active ? "Attivo" : "Collegato, spento";
+                string last = "Data non disponibile"; DateTime seen;
+                if (DateTime.TryParse(record.LastSeenUtc, out seen)) last = seen.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
+                MonitorSetting setting = live == null ? record.LastSetting : live.Baseline;
+                string resolution = setting == null ? "Da configurare" : setting.Width + " × " + setting.Height + "\r\n" + LayoutEditor.Aspect(setting.Width, setting.Height);
+                int index = monitorGrid.Rows.Add(record.DisplayName + (record.DisplayName == record.HardwareName ? "" : "\r\n" + record.HardwareName), connection, resolution, live == null ? last : "Ora");
+                DataGridViewRow row = monitorGrid.Rows[index]; row.Tag = record.DevicePath;
+                row.Cells[0].ToolTipText = record.DevicePath + "\r\n" + record.Adapter;
+                row.DefaultCellStyle.ForeColor = live == null ? Theme.Muted : Theme.Text;
+                if (record.DevicePath == selected) { row.Selected = true; monitorGrid.CurrentCell = row.Cells[0]; }
+            }
+            if (scroll >= 0 && scroll < monitorGrid.Rows.Count) monitorGrid.FirstDisplayedScrollingRowIndex = scroll;
         }
         private void RefreshDisplays(bool report)
         {
             if (preview || changing) return;
             try
             {
-                state = Native.Read(); monitors = Native.Inventory(state); monitorGrid.Rows.Clear();
-                foreach (MonitorInfo m in monitors) monitorGrid.Rows.Add(m.Name, m.Summary, m.Adapter);
-                currentMode.Text = "Attuale: " + Profile.ModeLabel(state.Topology()).ToLowerInvariant(); UpdateSwitch();
-                if (report) status.Text = monitors.Count + " monitor riconosciuti. Puoi applicare o salvare un profilo.";
+                state = Native.Read(); monitors = Native.Inventory(state);
+                bool historyChanged = MonitorHistory.Observe(settings, monitors, DateTime.UtcNow, report);
+                if (!historyInitialized || report) { historyChanged |= MonitorHistory.ImportKnown(settings, KnownMonitors.Read()); historyInitialized = true; }
+                if (historyChanged) ProfileStore.Save(ProfileStore.FileName, settings);
+                RenderHistory(); UpdateActiveProfile();
+                if (report) status.Text = monitors.Count + " monitor collegati · " + settings.Monitors.Count + " nello storico.";
             }
-            catch (Exception ex) { state = null; currentMode.Text = "Monitor non disponibili"; status.Text = ex.Message; Recovery.Log(ex); }
+            catch (Exception ex) { state = null; RenderHistory(); currentMode.Text = "Nessun profilo verificabile"; status.Text = ex.Message; Recovery.Log(ex); }
         }
         private bool Matches(Profile p)
         {
-            if (state == null || p == null) return false;
-            if (!p.HasLayout && p.Mode == 8) return state.Paths.All(path => !Native.IsInternal(path.Target.Technology));
-            if (!p.HasLayout) return state.Topology() == p.Mode;
-            try { return Native.Matches(p.Layout, state.Capture(monitors)); } catch { return false; }
+            if (state == null || p == null || !p.HasLayout) return false;
+            try { return Native.MatchesProtected(p.Layout, state.Capture(monitors)); } catch { return false; }
         }
-        private void UpdateSwitch()
+        private Profile ActiveProfile
         {
-            if (switchButton == null) return;
-            Profile a = pairA.SelectedItem as Profile, b = pairB.SelectedItem as Profile;
-            bool valid = a != null && b != null && a.Id != b.Id;
-            switchButton.Enabled = valid && !changing;
-            Profile next = valid ? (Matches(a) ? b : a) : null;
-            switchButton.Text = next == null ? "Scegli due profili diversi" : "Passa a " + (next.Name.Length > 27 ? next.Name.Substring(0, 25) + "…" : next.Name);
-            switchHint.Text = settings.SwitchHotkey.Label + "  ·  Alterna i due profili scelti";
+            get
+            {
+                if (preview) return settings.Profiles.FirstOrDefault();
+                if (state == null) return null;
+                try { return ProfileSelection.Active(settings, state.Capture(monitors)); } catch { return null; }
+            }
         }
-        private void PairChanged(object sender, EventArgs e)
+        private void UpdateActiveProfile()
         {
-            if (loading) return; var a = pairA.SelectedItem as Profile; var b = pairB.SelectedItem as Profile;
-            if (a == null || b == null) return; settings.SwitchA = a.Id; settings.SwitchB = b.Id;
-            SaveSettings(); UpdateSwitch(); RebuildTray();
+            if (currentMode == null) return;
+            Profile active = ActiveProfile;
+            currentMode.Text = active == null ? "Nessun profilo attivo" : "Profilo attivo: " + active.Name;
+            Profile requested = settings.Profiles.FirstOrDefault(p => p.Id == settings.ActiveProfileId);
+            protectionStatus.Text = protection.State == ProtectionState.Conflict ? "Protezione sospesa: " + protection.Detail :
+                protection.State == ProtectionState.MissingMonitor ? "Protezione in attesa: ricollega tutti i monitor del profilo." :
+                requested != null && requested.ProtectResolution && active == null ? "Configurazione diversa dal profilo: verifica o ripristino in corso" :
+                requested != null && requested.ProtectResolution ? "Protezione risoluzione attiva · proporzioni mantenute · lascia l'app nel tray" :
+                active == null ? "Applica un profilo per scegliere gli schermi e la risoluzione." : "Configurazione rilevata · protezione non attiva";
+            foreach (ListViewItem item in profileList.Items)
+            {
+                Profile p = (Profile)item.Tag;
+                item.SubItems[1].Text = active != null && active.Id == p.Id ? "Attivo" : !p.HasLayout ? "Configura" : "";
+                item.ForeColor = active != null && active.Id == p.Id ? Color.FromArgb(167, 221, 183) : Theme.Text;
+            }
+            if (tray != null)
+            {
+                string text = active == null ? "MonitorSwitch · nessun profilo attivo" : "MonitorSwitch · " + active.Name;
+                tray.Text = text.Length > 63 ? text.Substring(0, 63) : text; if (trayActiveId != (active == null ? "" : active.Id)) RebuildTray();
+            }
         }
-        private void TogglePair(bool background = false)
+        private void DeactivateProfile()
         {
-            if (changing || updating || preview) return; RefreshDisplays(false);
-            Profile a = pairA.SelectedItem as Profile, b = pairB.SelectedItem as Profile;
-            if (a == null || b == null || a.Id == b.Id) { status.Text = "Scegli due profili diversi per l'interruttore."; return; }
-            ApplyProfile(Matches(a) ? b : a, background);
+            if (changing || preview) return;
+            settings.ActiveProfileId = null; settings.ProfileDeactivated = true; protection.Reset(); SaveSettings(); UpdateActiveProfile();
+            status.Text = "Profilo disattivato. La configurazione degli schermi rimane quella attuale.";
+        }
+        private void RenameMonitor()
+        {
+            if (changing || preview || monitorGrid.CurrentRow == null) return;
+            MonitorRecord record = MonitorHistory.Find(settings, monitorGrid.CurrentRow.Tag as string); if (record == null) return;
+            using (var dialog = new RenameMonitorDialog(record))
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                string old = record.Alias; record.Alias = dialog.Alias;
+                try { ProfileStore.Save(ProfileStore.FileName, settings); RenderHistory(); UpdateSelected(); status.Text = "Nome del monitor salvato per tutti i profili."; }
+                catch (Exception ex) { record.Alias = old; ShowError(ex); }
+            }
+        }
+        private void ProtectProfile()
+        {
+            if (preview || changing || updating || state == null) return;
+            Profile profile = settings.Profiles.FirstOrDefault(p => p.Id == settings.ActiveProfileId);
+            if (profile == null || !profile.ProtectResolution) return;
+            ProtectionState before = protection.State;
+            bool corrected = protection.Tick(profile, monitors.Select(m => m.Key).ToList(), state.Capture(monitors), DateTime.UtcNow, delegate
+            {
+                DisplayPlan plan = Native.BuildPlan(profile.Layout, monitors); Native.Plan(plan, true);
+                changing = true;
+                try
+                {
+                    Recovery.Locked(delegate { Snapshot.Save(Recovery.FileName, state); });
+                    using (var recovery = new Guardian())
+                    {
+                        recovery.Arm(); Recovery.Locked(delegate { Native.Plan(plan, false); });
+                        DisplayState actual = Native.Read(); var inventory = Native.Inventory(actual); var captured = actual.Capture(inventory);
+                        if (!Native.MatchesProtected(profile.Layout, captured)) throw new InvalidOperationException("Risoluzione o proporzioni non rispettate dal driver.");
+                        if (recovery.HasExited) throw new InvalidOperationException("Protezione del cambio scaduta.");
+                        Recovery.Commit(actual); state = actual; monitors = inventory; return captured;
+                    }
+                }
+                catch { if (File.Exists(Recovery.FileName)) Recovery.Restore(); throw; }
+                finally { changing = false; }
+            });
+            if (corrected) status.Text = "Ripristinata la risoluzione del profilo " + profile.Name + ".";
+            if (protection.State == ProtectionState.Conflict && before != ProtectionState.Conflict)
+            {
+                status.Text = "Protezione sospesa: " + protection.Detail;
+                Recovery.Log(new InvalidOperationException(status.Text));
+                tray.ShowBalloonTip(6000, "Conflitto con il profilo", protection.Detail, ToolTipIcon.Warning);
+            }
+            UpdateActiveProfile();
         }
         private void ApplySelected() { if (Selected != null) ApplyProfile(Selected); }
         private void ApplyProfile(Profile profile, bool background = false)
@@ -452,15 +534,15 @@ namespace MonitorSwitch
             if (background) StayInTray();
             try
             {
-                profile.Check(); RefreshDisplays(false); if (state == null) throw new InvalidOperationException("Impossibile leggere la configurazione attuale.");
-                DisplayPlan plan = profile.HasLayout ? Native.BuildPlan(profile.Layout, monitors) : null;
-                if (plan != null) Native.Plan(plan, true);
-                changing = true; UpdateSwitch(); status.Text = "Applicazione di " + profile.Name + "…"; status.Refresh();
+                profile.Check(); if (!profile.HasLayout) throw new InvalidOperationException("Modifica il profilo e scegli i monitor da usare."); RefreshDisplays(false); if (state == null) throw new InvalidOperationException("Impossibile leggere la configurazione attuale.");
+                DisplayPlan plan = Native.BuildPlan(profile.Layout, monitors);
+                Native.Plan(plan, true);
+                changing = true; status.Text = "Applicazione di " + profile.Name + "…"; status.Refresh();
                 Recovery.Locked(delegate { Snapshot.Save(Recovery.FileName, state); }); guardian = new Guardian();
                 Stopwatch deadline = Stopwatch.StartNew(); guardian.Arm();
-                Recovery.Locked(delegate { if (plan == null) Native.ApplyTopology(profile.Mode); else Native.Plan(plan, false); });
+                Recovery.Locked(delegate { Native.Plan(plan, false); });
                 DisplayState actual = Native.Read(); List<MonitorInfo> inventory = Native.Inventory(actual);
-                if (plan != null && !Native.Matches(profile.Layout, actual.Capture(inventory)))
+                if (!Native.MatchesProtected(profile.Layout, actual.Capture(inventory)))
                     throw new InvalidOperationException("Windows ha applicato impostazioni diverse dal profilo salvato. La configurazione precedente verra ripristinata.");
                 if (!background) ShowWindow();
                 if (settings.ConfirmChanges)
@@ -474,7 +556,8 @@ namespace MonitorSwitch
                     }
                 }
                 else if (deadline.ElapsedMilliseconds >= 25000 || guardian.HasExited) throw new InvalidOperationException("Il cambio ha richiesto troppo tempo. Riprova.");
-                Recovery.Commit(actual); status.Text = "Profilo " + profile.Name + " applicato. Rimarra attivo anche chiudendo l'app.";
+                Recovery.Commit(actual); settings.ActiveProfileId = profile.Id; settings.ProfileDeactivated = false; protection.Reset(); SaveSettings();
+                status.Text = "Profilo " + profile.Name + " attivo." + (profile.ProtectResolution ? " Protezione risoluzione attiva nel tray." : "");
             }
             catch (Exception ex)
             {
@@ -486,7 +569,7 @@ namespace MonitorSwitch
             finally
             {
                 confirmation = null; if (guardian != null) { guardian.Dispose(); guardian = null; }
-                changing = false; RefreshDisplays(false); UpdateSwitch();
+                changing = false; RefreshDisplays(false);
                 if (background) StayInTray();
             }
         }
@@ -498,17 +581,19 @@ namespace MonitorSwitch
             RefreshDisplays(false);
             List<MonitorSetting> layout = null;
             try { if (state != null) layout = state.Capture(monitors); } catch (Exception ex) { Recovery.Log(ex); }
-            using (var editor = new ProfileDialog(existing, capture, layout, monitors))
+            using (var editor = new ProfileDialog(existing, capture, layout, monitors, settings.Monitors))
             {
                 while (editor.ShowDialog(this) == DialogResult.OK)
                 {
                     Profile result = editor.Result;
                     int index = existing == null ? settings.Profiles.Count : settings.Profiles.IndexOf(existing);
                     if (existing == null) settings.Profiles.Add(result); else settings.Profiles[index] = result;
-                    try { settings.Check(); ProfileStore.Save(ProfileStore.FileName, settings); RebuildProfiles(result.Id); status.Text = "Profilo salvato."; return; }
+                    string oldActive = settings.ActiveProfileId; bool oldDeactivated = settings.ProfileDeactivated;
+                    if (result.Id == settings.ActiveProfileId) { settings.ActiveProfileId = null; settings.ProfileDeactivated = true; }
+                    try { settings.Check(); ProfileStore.Save(ProfileStore.FileName, settings); if (oldActive == result.Id) protection.Reset(); RebuildProfiles(result.Id); status.Text = "Profilo salvato. Attivalo per applicare le impostazioni."; return; }
                     catch (Exception ex)
                     {
-                        if (existing == null) settings.Profiles.RemoveAt(index); else settings.Profiles[index] = existing;
+                        settings.ActiveProfileId = oldActive; settings.ProfileDeactivated = oldDeactivated; if (existing == null) settings.Profiles.RemoveAt(index); else settings.Profiles[index] = existing;
                         MessageBox.Show(this, ex.Message, "Profilo non salvato", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
                 }
@@ -517,26 +602,11 @@ namespace MonitorSwitch
         private void DeleteProfile()
         {
             Profile p = Selected; if (p == null || changing || preview) return;
-            if (settings.Profiles.Count == 1) { status.Text = "Mantieni almeno un profilo."; return; }
             if (MessageBox.Show(this, "Eliminare il profilo " + p.Name + "?", "Elimina profilo", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            int index = settings.Profiles.IndexOf(p); string a = settings.SwitchA, b = settings.SwitchB;
-            settings.Profiles.Remove(p); if (settings.SwitchA == p.Id) settings.SwitchA = settings.Profiles[0].Id;
-            if (settings.SwitchB == p.Id) settings.SwitchB = settings.Profiles.FirstOrDefault(x => x.Id != settings.SwitchA) != null ? settings.Profiles.First(x => x.Id != settings.SwitchA).Id : settings.SwitchA;
-            try { ProfileStore.Save(ProfileStore.FileName, settings); RebuildProfiles(null); status.Text = "Profilo eliminato."; }
-            catch (Exception ex) { settings.Profiles.Insert(index, p); settings.SwitchA = a; settings.SwitchB = b; ShowError(ex); }
-        }
-        private void EditSwitchKey()
-        {
-            if (preview || changing) return;
-            using (var dialog = new ShortcutDialog(settings.SwitchHotkey))
-            {
-                while (dialog.ShowDialog(this) == DialogResult.OK)
-                {
-                    Shortcut old = settings.SwitchHotkey; settings.SwitchHotkey = dialog.Result;
-                    try { settings.Check(); ProfileStore.Save(ProfileStore.FileName, settings); RegisterShortcuts(); UpdateSwitch(); RebuildTray(); return; }
-                    catch (Exception ex) { settings.SwitchHotkey = old; ShowError(ex); }
-                }
-            }
+            int index = settings.Profiles.IndexOf(p); string active = settings.ActiveProfileId; bool oldDeactivated = settings.ProfileDeactivated;
+            settings.Profiles.Remove(p); if (active == p.Id) { settings.ActiveProfileId = null; settings.ProfileDeactivated = true; }
+            try { ProfileStore.Save(ProfileStore.FileName, settings); if (active == p.Id) protection.Reset(); RebuildProfiles(null); status.Text = "Profilo eliminato."; }
+            catch (Exception ex) { settings.Profiles.Insert(index, p); settings.ActiveProfileId = active; settings.ProfileDeactivated = oldDeactivated; ShowError(ex); }
         }
         private void SaveSettings() { try { ProfileStore.Save(ProfileStore.FileName, settings); } catch (Exception ex) { ShowError(ex); } }
         private void ShowError(Exception ex) { Recovery.Log(ex); MessageBox.Show(this, ex.Message, "Monitor Switch", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
@@ -551,14 +621,14 @@ namespace MonitorSwitch
         private void OpenSettings() { if (!preview) { try { Process.Start(new ProcessStartInfo("ms-settings:display") { UseShellExecute = true }); } catch (Exception ex) { ShowError(ex); } } }
         private void ShowHelp()
         {
-            MessageBox.Show(this, "I pulsanti rapidi funzionano come le modalita Windows Win+P.\r\n\r\nGioco duplica lo schermo del portatile; Lavoro lascia attivo solo il monitor esterno. Windows sceglie una risoluzione compatibile nella duplicazione.\r\n\r\nPer scegliere le risoluzioni: apri Modifica, attiva Personalizza monitor e risoluzioni e scegli o scrivi le dimensioni per ogni schermo. In duplicazione la risoluzione e comune. Per frequenze, orientamento e disposizione puoi ancora usare Windows e Salva configurazione attuale.\r\n\r\nI tasti rapidi e il menu del tray cambiano profilo senza aprire la finestra principale. Con la conferma attiva appare solo la richiesta temporanea di conferma. Modifica un profilo per rinominarlo, cambiarne la modalita o assegnare un tasto rapido. Scegli due profili nell'interruttore in basso per alternarli con un solo bottone.\r\n\r\nHai 20 secondi per confermare ogni cambio. Dopo aver verificato i profili puoi togliere Conferma dopo il cambio per passare subito da uno all'altro. Le modifiche mantenute rimangono attive anche chiudendo l'app. Minimizzare lascia l'app vicino all'orologio e le scorciatoie continuano a funzionare.\r\n\r\nLa duplicazione non garantisce il formato 16:9: dipende dai monitor, dal driver e dalla risoluzione comune selezionata. Non servono modifiche ai pannelli Intel o NVIDIA.", "Come usare Monitor Switch", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "Lo storico include i monitor ricordati da Windows, quelli rilevati dall'app e quelli nei profili precedenti, anche quando sono scollegati. Usa Rinomina per dare a ogni schermo un nome riconoscibile.\r\n\r\nCrea un profilo, spunta gli schermi da accendere e scegli per ciascuno la risoluzione. Gli altri schermi vengono disattivati; piu schermi selezionati estendono il desktop. Il monitor principale si sceglie nell'editor. Il formato (16:9, 16:10...) deriva dalla risoluzione.\r\n\r\nLa protezione ripristina i cambi di risoluzione e richiede proporzioni mantenute dal driver. Lascia MonitorSwitch aperto nel tray. Per i giochi usa Finestra senza bordi / Borderless e la risoluzione del profilo: il fullscreen esclusivo puo cambiare modalita autonomamente e il rendering interno dipende dal gioco. Dopo tre ripristini in un minuto la protezione si sospende per evitare cambi continui: passa a borderless e riattiva il profilo.\r\n\r\nIl profilo attivo e verificato sulla configurazione effettiva. Disattiva profilo ferma la protezione lasciando gli schermi come sono. La chiusura dell'app mantiene la configurazione ma interrompe la protezione.\r\n\r\nCon la conferma attiva hai 20 secondi per mantenere ogni cambio manuale, altrimenti viene ripristinato. I profili della versione precedente restano disponibili: se indicati come Da configurare, aprili e scegli gli schermi.", "Come usare MonitorSwitch", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
                 if (IsHandleCreated) foreach (int id in hotkeys.Keys) UnregisterHotKey(Handle, id);
-                refreshTimer.Dispose(); tray.Visible = false; if (tray.ContextMenuStrip != null) tray.ContextMenuStrip.Dispose(); tray.Dispose();
+                refreshTimer.Dispose(); protectionTimer.Dispose(); tray.Visible = false; if (tray.ContextMenuStrip != null) tray.ContextMenuStrip.Dispose(); tray.Dispose();
                 updateCancellation.Cancel();
             }
             base.Dispose(disposing);

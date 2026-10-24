@@ -32,6 +32,13 @@ namespace MonitorSwitch
                 new Mode { Type = 1, Source = new SourceMode { Width = 3440, Height = 1440, Format = 4 } },
                 new Mode { Type = 2, Target = new Signal { Active = new Region { Width = 3440, Height = 1440 }, VSync = new Rational { Num = 120, Den = 1 }, PixelRate = 600000000 } } } };
         }
+        private static Settings Fixture()
+        {
+            var s = Settings.Defaults();
+            for (int i = 0; i < 4; i++) s.Profiles.Add(new Profile { Id = Guid.NewGuid().ToString("N"), Name = "Profilo " + i, Mode = 0,
+                Hotkey = new Shortcut { Modifiers = 3, Key = (uint)(112 + i) }, Layout = new List<MonitorSetting> { Setting("screen-" + i, 0, 0) } });
+            return s;
+        }
         public static int Run(string report)
         {
             string folder = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(report)), "monitor-tests-" + Guid.NewGuid().ToString("N"));
@@ -42,6 +49,7 @@ namespace MonitorSwitch
                 Check(Marshal.SizeOf(typeof(Signal)) == 48, "Signal ABI"); Check(Marshal.SizeOf(typeof(TargetName)) == 420, "Target identity ABI");
                 Check(Marshal.SizeOf(typeof(SourceName)) == 84, "Source ABI"); Check(Marshal.SizeOf(typeof(DisplayDevice)) == 840, "GPU name ABI");
                 Check(Marshal.SizeOf(typeof(DeviceMode)) == 220, "Resolution DEVMODEW ABI");
+                Check(Marshal.SizeOf(typeof(KnownMonitors.InterfaceData)) == 32 && Marshal.SizeOf(typeof(KnownMonitors.DeviceData)) == 32, "SetupAPI x64 monitor interface ABI");
                 Check(Marshal.SizeOf(typeof(PreferredMode)) == 80, "Preferred target timing ABI");
                 Check(AppAssets.TrayIcon.Width == 16 && AppAssets.Icon.Width == 48, "Embedded multi-size application and tray icons");
                 using (var window = new MainForm(true))
@@ -83,30 +91,29 @@ namespace MonitorSwitch
                 Reject(delegate { uint w, h; LayoutEditor.Resolution("1920", out w, out h); }, "Reject incomplete resolution");
                 Reject(delegate { uint w, h; LayoutEditor.Resolution("0 x 1080", out w, out h); }, "Reject zero resolution");
                 Reject(delegate { uint w, h; LayoutEditor.Resolution("999999999999 x 1080", out w, out h); }, "Reject overflowing resolution");
-                Settings defaults = Settings.Defaults(); defaults.Check();
+                Settings empty = Settings.Defaults(); empty.Check();
+                Check(empty.Version == 2 && empty.Profiles.Count == 0 && empty.Monitors.Count == 0, "New archive starts with history and no invented profiles");
+                Settings defaults = Fixture(); defaults.Check();
                 Check(defaults.ConfirmChanges, "Display confirmation enabled by default");
-                Check(defaults.Profiles.Count == 4 && defaults.Profiles[0].Mode == 2 && defaults.Profiles[1].Mode == 8, "Game clone and work external defaults");
-                Check(defaults.SwitchA == defaults.Profiles[0].Id && defaults.SwitchB == defaults.Profiles[1].Id, "Default toggle pair");
-                Check(defaults.SwitchHotkey.Label == "Ctrl+Alt+F10", "Default toggle shortcut");
+                Check(defaults.Profiles.All(p => p.HasLayout && p.ProtectResolution), "New profiles have explicit layouts and protection by default");
                 string file = Path.Combine(folder, "profiles.xml"); ProfileStore.Save(file, defaults);
-                Settings loaded = ProfileStore.Load(file); Check(loaded.Profiles[0].Id == defaults.Profiles[0].Id && loaded.SwitchB == defaults.SwitchB, "Settings round trip");
+                Settings loaded = ProfileStore.Load(file); Check(loaded.Profiles[0].Id == defaults.Profiles[0].Id && loaded.Version == 2, "Settings round trip");
                 loaded.Profiles[0].Name = "Gioco & relax à"; ProfileStore.Save(file, loaded);
                 Check(ProfileStore.Load(file).Profiles[0].Name == "Gioco & relax à", "Atomic replacement and Unicode XML");
                 loaded.ConfirmChanges = false; ProfileStore.Save(file, loaded);
                 Check(!ProfileStore.Load(file).ConfirmChanges, "One-click switch preference persists");
                 var duplicate = ProfileStore.Load(file); duplicate.Profiles[1].Hotkey = duplicate.Profiles[0].Hotkey.Clone();
                 Reject(delegate { duplicate.Check(); }, "Reject duplicate profile hotkey");
-                duplicate = ProfileStore.Load(file); duplicate.Profiles[0].Hotkey = duplicate.SwitchHotkey.Clone();
-                Reject(delegate { duplicate.Check(); }, "Reject shortcut colliding with toggle");
                 duplicate = ProfileStore.Load(file); duplicate.Profiles[1].Name = duplicate.Profiles[0].Name;
                 Reject(delegate { duplicate.Check(); }, "Reject duplicate names");
-                duplicate = ProfileStore.Load(file); duplicate.SwitchA = "missing";
-                Reject(delegate { duplicate.Check(); }, "Reject missing toggle profile");
+                duplicate = ProfileStore.Load(file); duplicate.ActiveProfileId = "missing";
+                Reject(delegate { duplicate.Check(); }, "Reject missing active profile");
                 duplicate = ProfileStore.Load(file); duplicate.Profiles[0].Mode = 6;
                 Reject(delegate { duplicate.Check(); }, "Reject invalid topology flags");
                 Reject(delegate { new Shortcut { Key = 65 }.Check(); }, "Reject unmodified global letter");
                 Reject(delegate { new Shortcut { Key = 112, Modifiers = 8 }.Check(); }, "Reject unsupported modifier");
-                var single = Settings.Defaults(); single.Profiles.RemoveRange(1, 3); single.SwitchA = single.SwitchB = single.Profiles[0].Id; single.Check(); count++;
+                var single = Fixture(); single.Profiles.RemoveRange(1, 3); single.Check(); count++;
+                single.Profiles.Clear(); single.Check(); count++;
                 File.WriteAllText(file, "<!DOCTYPE Settings [<!ENTITY bad SYSTEM 'file:///not-read'>]><Settings>&bad;</Settings>");
                 Reject(delegate { ProfileStore.Load(file); }, "DTD and external entity rejected");
                 var a = Monitor("panel", 7, 0, 1); var b = Monitor("external", 9, 0, 1);
@@ -163,6 +170,81 @@ namespace MonitorSwitch
                 Check(LayoutEditor.Build(2, clone).All(s => s.Group == 0 && s.X == 0), "Duplicate editor keeps one shared desktop");
                 var shifted = new List<MonitorSetting> { Setting("external", 1, 1920) };
                 Check(LayoutEditor.Build(0, shifted)[0].X == 0, "Disabling the primary monitor normalizes the new primary origin");
+                Check(LayoutEditor.Aspect(1920, 1080) == "16:9" && LayoutEditor.Aspect(1920, 1200) == "16:10", "Aspect ratio computed exactly from selected resolution");
+                Check((Native.PlanFlags(false) & 0x100) != 0 && (Native.PlanFlags(false) & 0x400) == 0 && (Native.PlanFlags(true) & 0x100) == 0, "Apply forces driver mode without allowing substituted resolutions");
+                var stretched = Setting("panel", 0, 0); stretched.Scaling = 3; stretched.Timing = new Signal { Active = new Region { Width = 3440, Height = 1440 } };
+                var wanted = new List<MonitorSetting> { Setting("panel", 0, 0) };
+                Check(!Native.MatchesProtected(wanted, new List<MonitorSetting> { stretched }), "Same desktop resolution with distorted signal aspect is rejected");
+                stretched.Scaling = 4;
+                Check(Native.MatchesProtected(wanted, new List<MonitorSetting> { stretched }), "Aspect preserving scaling to ultrawide signal is accepted");
+                stretched.Scaling = 1; stretched.Timing = new Signal { Active = new Region { Width = 1920, Height = 1080 } };
+                Check(Native.MatchesProtected(wanted, new List<MonitorSetting> { stretched }), "Identity scaling at selected signal aspect is accepted");
+                stretched.Rotation = 2; stretched.Width = 1080; stretched.Height = 1920;
+                Check(Native.PreservesAspect(stretched), "Portrait signal aspect accounts for rotation");
+                var history = Settings.Defaults(); var now = DateTime.UtcNow;
+                var live = Monitor("persistent", 1, 1); live.Baseline = Setting("persistent", 0, 0); live.Active = true;
+                Check(MonitorHistory.Observe(history, new List<MonitorInfo> { live }, now, false), "Connected monitor added to persistent history");
+                history.Monitors[0].Alias = "Scrivania à";
+                live.Key = "PERSISTENT"; live.Name = "Changed driver name";
+                MonitorHistory.Observe(history, new List<MonitorInfo> { live }, now.AddMinutes(2), false);
+                Check(history.Monitors.Count == 1 && history.Monitors[0].DisplayName == "Scrivania à" && history.Monitors[0].HardwareName == live.Name, "Reconnect merges stable identity and preserves alias");
+                MonitorHistory.Observe(history, new List<MonitorInfo>(), now.AddMinutes(3), false);
+                Check(history.Monitors.Count == 1 && history.Monitors[0].LastSeenUtc == now.AddMinutes(2).ToString("o", System.Globalization.CultureInfo.InvariantCulture), "Disconnected monitor and last seen survive refresh");
+                ProfileStore.Save(file, history); history = ProfileStore.Load(file);
+                Check(history.Monitors[0].Alias == "Scrivania à" && history.Monitors[0].FirstSeenUtc != null, "Names and history timestamps survive XML");
+                Check(MonitorHistory.ImportKnown(history, new List<MonitorRecord> { new MonitorRecord { DevicePath = "old-tv", HardwareName = "Remembered TV" }, new MonitorRecord { DevicePath = "persistent", HardwareName = "Generic display" } }) && history.Monitors.Count == 2 && history.Monitors[0].Alias == "Scrivania à", "Windows remembered interfaces merge without replacing names");
+                ProfileStore.Save(file, history); Check(ProfileStore.Load(file).Monitors[1].LastSetting == null, "Historical monitor without known resolution can be saved");
+                history.Monitors.Add(new MonitorRecord { DevicePath = "persistent", HardwareName = "duplicate" });
+                Reject(delegate { history.Check(); }, "Duplicate historical device identities rejected");
+                var legacy = Fixture(); legacy.Version = 1; legacy.SwitchA = legacy.Profiles[0].Id; legacy.SwitchB = legacy.Profiles[1].Id;
+                legacy.SwitchHotkey = new Shortcut { Modifiers = 3, Key = 121 }; legacy.Profiles[0].Mode = 2; legacy.Profiles[0].Layout.Clear();
+                ProfileStore.Save(file, legacy); var migrated = ProfileStore.Load(file);
+                Check(migrated.Version == 2 && migrated.Profiles.Count == 4 && !migrated.Profiles[0].HasLayout && !migrated.Profiles[1].ProtectResolution && migrated.SwitchHotkey.Key == 0, "Version 1 migration preserves profiles without arming a legacy controller");
+                ProfileStore.Save(file, migrated); Check(ProfileStore.Load(file).Version == 2, "Upgraded settings save and load");
+                Check(File.Exists(file + ".v1.bak") && File.ReadAllText(file + ".v1.bak").Contains("<Version>1</Version>"), "Migration retains the original legacy XML before replacing it");
+                var protectedProfile = new Profile { Id = Guid.NewGuid().ToString("N"), Name = "Gioco", Mode = 0, Layout = wanted };
+                var policy = new ProfileProtection(); int corrections = 0;
+                Func<List<MonitorSetting>> correct = delegate { corrections++; return wanted; };
+                Check(!policy.Tick(protectedProfile, new List<string> { "panel" }, wanted, now, correct) && corrections == 0 && policy.State == ProtectionState.Watching, "Protection never reapplies an already matching mode");
+                var drift = new List<MonitorSetting> { Setting("panel", 0, 0) }; drift[0].Width = 2560;
+                Check(policy.Tick(protectedProfile, new List<string> { "PANEL" }, drift, now, correct) && corrections == 1, "Game resolution drift restores profile once");
+                Check(!policy.Tick(protectedProfile, new List<string>(), drift, now, correct) && policy.State == ProtectionState.MissingMonitor && corrections == 1, "Unplug suspends protection without native changes");
+                Check(policy.Tick(protectedProfile, new List<string> { "panel" }, drift, now, correct) && policy.State == ProtectionState.Watching, "Reconnect resumes the requested profile");
+                policy.Tick(protectedProfile, new List<string> { "panel" }, drift, now, correct);
+                Check(!policy.Tick(protectedProfile, new List<string> { "panel" }, drift, now, correct) && corrections == 3 && policy.State == ProtectionState.Conflict, "Repeated game mode fights suspend after three corrections per minute");
+                Check(!policy.Tick(protectedProfile, new List<string> { "panel" }, drift, now.AddMinutes(2), correct) && corrections == 3, "A conflict requires explicit profile reactivation");
+                policy.Reset();
+                Check(policy.Tick(protectedProfile, new List<string> { "panel" }, drift, now.AddMinutes(2), correct), "Reactivation resets conflict protection");
+                policy.Reset(); protectedProfile.ProtectResolution = false;
+                Check(!policy.Tick(protectedProfile, new List<string> { "panel" }, drift, now, correct) && policy.State == ProtectionState.Off, "Disabled protection never changes displays");
+                protectedProfile.ProtectResolution = true; policy.Reset();
+                Check(!policy.Tick(protectedProfile, new List<string> { "panel" }, drift, now, delegate { return drift; }) && policy.State == ProtectionState.Conflict, "Driver substitution is reported as a conflict");
+                var protectedStore = Settings.Defaults(); protectedStore.Profiles.Add(protectedProfile); protectedStore.ActiveProfileId = protectedProfile.Id;
+                ProfileStore.Save(file, protectedStore);
+                Check(ProfileStore.Load(file).ActiveProfileId == protectedProfile.Id && ProfileStore.Load(file).Profiles[0].ProtectResolution, "Active profile and protection preference persist");
+                var selection = Settings.Defaults(); selection.Profiles.Add(protectedProfile);
+                Check(ProfileSelection.Active(selection, wanted) == protectedProfile, "One matching profile is recognized from actual output");
+                Check(ProfileSelection.Active(selection, drift) == null, "Different actual resolution never reports a profile active");
+                var twin = new Profile { Id = Guid.NewGuid().ToString("N"), Name = "Stesso schermo", Mode = 0, Layout = wanted };
+                selection.Profiles.Add(twin);
+                Check(ProfileSelection.Active(selection, wanted) == null, "Ambiguous matching profiles do not invent an active selection");
+                selection.ActiveProfileId = twin.Id;
+                Check(ProfileSelection.Active(selection, wanted) == twin && ProfileSelection.Active(selection, drift) == null, "Explicit activation disambiguates only if the output still matches");
+                selection.ActiveProfileId = null; selection.ProfileDeactivated = true; selection.Profiles.Remove(twin);
+                Check(ProfileSelection.Active(selection, wanted) == null, "Explicit deactivation overrides coincidentally matching display settings");
+                ProfileStore.Save(file, selection);
+                Check(ProfileStore.Load(file).ProfileDeactivated && ProfileSelection.Active(ProfileStore.Load(file), wanted) == null, "Deactivation survives restart");
+                var dialogHistory = new List<MonitorRecord> {
+                    new MonitorRecord { DevicePath = "panel", HardwareName = "Generic panel", Alias = "Il mio monitor", LastSetting = wanted[0] },
+                    new MonitorRecord { DevicePath = "remembered", HardwareName = "Old TV", Alias = "TV salotto" } };
+                using (var dialog = new ProfileDialog(protectedProfile, false, wanted, null, dialogHistory))
+                {
+                    var rows = dialog.Controls.OfType<System.Windows.Forms.FlowLayoutPanel>().Single().Controls.OfType<ResolutionRow>().ToList();
+                    Check(rows.Count == 2 && rows[0].DisplayName == "Il mio monitor" && rows[1].DisplayName == "TV salotto" && !rows[1].EnabledMonitor.Checked, "Editor shows global aliases and an unobserved disconnected monitor");
+                    dialog.ShowInTaskbar = false; dialog.StartPosition = System.Windows.Forms.FormStartPosition.Manual; dialog.Location = new System.Drawing.Point(-30000, -30000); dialog.Show();
+                    dialog.Controls.OfType<System.Windows.Forms.Button>().Single(button => button.Text == "Salva profilo").PerformClick();
+                    Check(dialog.Result != null && dialog.Result.Mode == 0 && dialog.Result.Layout.Count == 1 && dialog.Result.Layout[0].Scaling == 4 && dialog.Result.ProtectResolution, "Editor saves explicit selected displays with aspect preservation and protection");
+                }
                 DisplayState restored = Snapshot.Load(snapshot); Check(restored.Modes[1].Target.PixelRate == 600000000 && restored.Modes[0].Source.Width == 3440, "Exact rollback snapshot round trip");
                 byte[] bytes = File.ReadAllBytes(snapshot); Array.Resize(ref bytes, bytes.Length - 1); File.WriteAllBytes(snapshot, bytes);
                 Reject(delegate { Snapshot.Load(snapshot); }, "Truncated recovery snapshot rejected");

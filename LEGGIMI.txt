@@ -1,167 +1,107 @@
-MONITOR SWITCH 2.3 - Windows 10/11 x64
+MonitorSwitch 3.0.0 - Storico monitor e profili
+Windows 10/11 x64 - portatile - interfaccia italiana
 
 AVVIO
-Avvia MonitorSwitch.exe. Non servono installazione o amministratore.
-Il cambio dei monitor funziona offline; gli aggiornamenti richiedono rete.
-Usa il .NET Framework 4.x gia incluso in Windows.
+Estrai lo ZIP e apri MonitorSwitch.exe. Non servono installazione, runtime
+aggiuntivi o diritti di amministratore.
 
-AVVIO CON WINDOWS
-Attiva Avvia con Windows (minimizzato) nella finestra o nel menu dell'icona
-vicino all'orologio. Al prossimo accesso a Windows l'app partira direttamente
-nel tray, senza mostrare la finestra, con le scorciatoie attive.
-Fai doppio clic sull'icona per aprirla. Togli la spunta per disattivare l'avvio.
-L'opzione e inizialmente disattivata e vale solo per il tuo account Windows.
-Non viene applicato alcun profilo monitor all'avvio.
-Scegli una posizione definitiva per l'EXE prima di attivarla. Se sposti o rinomini
-il programma, aprilo dalla nuova posizione e disattiva/riattiva l'opzione.
-Se lo disabiliti in Gestione attivita di Windows, riabilitalo anche da li.
+STORICO MONITOR
+La schermata include i monitor ricordati da Windows, quelli rilevati dall'app
+e quelli presenti nei profili precedenti. Anche gli schermi scollegati rimangono
+nello storico. Seleziona un monitor e premi Rinomina, oppure fai doppio clic.
+Il nome personalizzato vale in tutti i profili. Lascia il nome vuoto per usare
+quello originale. Ultimo rilevamento indica quando l'app ha osservato il monitor;
+i monitor storici di Windows possono non avere ancora data o risoluzione.
+Le informazioni vengono salvate automaticamente per il tuo account Windows.
+Cambiando porta, dock o driver, Windows puo assegnare una nuova identita.
 
-GIOCO E LAVORO
-Profili iniziali:
-  Gioco: duplica gli schermi.
-  Lavoro: mostra solo i monitor esterni.
-  Due schermi: estendi.
-  Solo portatile: usa soltanto lo schermo interno.
-Se alla prima apertura stai gia duplicando, Gioco acquisisce quella
-configurazione esatta, con risoluzioni e frequenze. Altrimenti usa Duplica.
+CREARE UN PROFILO
+1. Premi Nuovo e scegli un nome, ad esempio Gioco 16:9 o Lavoro ultrawide.
+2. Spunta i monitor da accendere. Gli altri saranno disattivati.
+3. Scegli o scrivi la risoluzione di ciascuno, ad esempio 1920 x 1080.
+   Il formato viene calcolato dalla risoluzione; non e una preferenza separata.
+4. Scegli il monitor principale. Gli altri estendono il desktop alla sua destra.
+5. Se vuoi, assegna una scorciatoia globale e lascia attiva la protezione.
+6. Salva, poi premi Attiva profilo selezionato.
+Puoi configurare anche un monitor scollegato, ma devi ricollegarlo prima di
+attivare quel profilo. Se la risoluzione non e mai stata rilevata, inseriscila.
+Salva configurazione attuale precompila i monitor e le risoluzioni in uso.
+Il nuovo editor salva sempre una selezione esplicita con desktop esteso.
 
-In basso scegli i due profili da alternare: Passa a... oppure Ctrl+Alt+F10
-passano dall'uno all'altro. Se la configurazione attuale non corrisponde al
-primo profilo, viene applicato il primo.
+PROFILO ATTIVO
+La parte alta, l'elenco e il menu vicino all'orologio mostrano il profilo attivo
+solo quando corrisponde alla configurazione reale. La semplice selezione di
+una riga non applica il profilo. Se piu profili corrispondono e nessuno e stato
+attivato esplicitamente, l'app non ne sceglie uno arbitrariamente.
+Disattiva profilo ferma la protezione e lascia gli schermi come sono.
+Puoi eliminare tutti i profili: lo storico dei monitor viene mantenuto.
 
-Inizialmente ogni cambio richiede conferma entro 20 secondi: premi Mantieni.
-Ripristina, Esc o il timeout tornano alla configurazione precedente.
-Dopo aver verificato i profili puoi togliere Conferma dopo il cambio in
-basso a destra: il cambio riuscito viene mantenuto subito, con un clic.
+RISOLUZIONE, PROPORZIONI E VIDEOGIOCHI
+L'app richiede le risoluzioni esatte e uno scaling che mantenga le proporzioni,
+poi verifica il risultato. Se Windows sostituisce la risoluzione o il driver
+stira l'immagine, il cambio viene rifiutato e viene ripristinata la situazione
+precedente. Il segnale fisico puo restare alla risoluzione nativa del monitor:
+lo scaling della GPU deve mantenere le proporzioni dell'immagine scelta.
 
-PERSONALIZZAZIONE
-Nuovo crea un profilo con nome, modalita e tasto rapido a scelta.
-Modifica cambia nome, modalita e scorciatoia del profilo selezionato.
-Applica profilo selezionato o doppio clic lo attivano.
-Elimina rimuove il profilo dopo conferma; mantieni almeno un profilo.
-Personalizza tasto rapido cambia la scorciatoia dell'interruttore.
+La protezione e attiva per i nuovi profili. Lascia l'app aperta nel tray:
+controlla i cambi video e verifica il profilo ogni 1,5 secondi. Se un gioco
+cambia risoluzione, la protezione tenta di ripristinare il profilo. La mancanza
+di un monitor sospende il ripristino; la riconnessione lo riabilita. Dopo tre
+ripristini in un minuto, un ulteriore cambio sospende la protezione e mostra
+una notifica. Risolvi il conflitto e riattiva il profilo per riprovare.
 
-CONFIGURAZIONI PRECISE E MONITOR SPECIFICI
-Per scegliere le risoluzioni direttamente nel programma:
-1. Seleziona un profilo e premi Modifica, oppure crea un Nuovo profilo.
-2. Scegli la modalita e attiva Personalizza monitor e risoluzioni.
-3. Scegli o scrivi la risoluzione per ogni monitor, per esempio 1920 x 1080.
-4. Salva il profilo e applicalo: il driver verifica il cambio prima di farlo.
-In Duplica la risoluzione desktop e comune: cambiandone una si aggiornano
-anche gli altri monitor. In Estendi puo essere diversa per ogni schermo.
-La frequenza del segnale attuale o preferita viene mantenuta.
-In Configurazione salvata puoi scegliere quali monitor lasciare attivi.
-Per Estendi e Solo esterni con risoluzioni personalizzate la disposizione
-viene generata da sinistra a destra. Per conservare una disposizione diversa
-usa Configurazione salvata o acquisisci le impostazioni di Windows.
+Per i giochi usa Finestra senza bordi / Borderless e seleziona nel gioco la
+risoluzione del profilo. Il fullscreen esclusivo puo scegliere autonomamente
+modalita e scaling: un programma esterno non puo bloccarli universalmente.
+La protezione reagisce ai cambi rilevati; non e un blocco a livello driver.
+Rendering interno, campo visivo, impostazioni del gioco e scaling interno del
+monitor non vengono controllati. Alcuni driver rifiutano cambi durante il
+fullscreen esclusivo. Non vengono installati driver, override EDID o hook nei
+giochi. Non e garantito il blocco della risoluzione in ogni videogioco.
 
-Per acquisire anche disposizione, orientamento e frequenze da Windows:
-1. Premi Impostazioni Windows.
-2. Configura gli schermi: quali usare, duplicazione/estensione, risoluzione,
-   frequenza, orientamento, disposizione e monitor primario.
-3. Torna nell'app, premi Aggiorna monitor e Salva configurazione attuale.
-4. Assegna un nome diverso dagli altri e una scorciatoia, se la desideri.
-Per aggiornare un profilo: Modifica > Usa la configurazione attuale > Salva.
-Disposizione, orientamento e frequenze si modificano in Windows, poi l'app
-le acquisisce e le richiama. Le risoluzioni si possono modificare nell'app.
+SICUREZZA DEL CAMBIO
+Con Conferma dopo il cambio hai 20 secondi per premere Mantieni; altrimenti
+viene ripristinata la configurazione precedente. Un processo separato protegge
+anche da un'uscita dell'app durante un cambio incompleto. Dopo avere verificato
+i profili puoi disattivare la conferma. I ripristini automatici della protezione
+usano backup e controllo del risultato, senza riaprire la conferma ogni volta.
+Chiudendo l'app la configurazione resta, ma la protezione si interrompe.
+Alla riapertura la protezione salvata riparte solo se il profilo corrisponde
+ancora agli schermi attuali; l'avvio non applica una configurazione diversa.
 
-I monitor salvati sono identificati tramite il percorso dispositivo Windows
-e riassociati agli identificatori attuali della GPU, anche dopo un riavvio.
-Un cambio di porta/dock/driver puo cambiare l'identita: ricrea il profilo.
-Se manca un monitor richiesto dal profilo, quel profilo non viene applicato.
+AGGIORNAMENTO DA 2.x
+Profili, scorciatoie e preferenze sono conservati. Prima di salvare la migrazione,
+il file originale viene copiato in profiles.xml.v1.bak nella stessa cartella. I layout esatti rimangono
+utilizzabili. I vecchi profili generici riportano Configura: aprili con Modifica
+e scegli i monitor. La protezione nei vecchi profili e disattivata finche non
+la abiliti. Il nuovo editor converte una vecchia duplicazione in una selezione
+estesa quando salvi. I pulsanti di modalita rapida e l'interruttore tra due
+profili sono rimossi; il vecchio tasto dell'interruttore viene liberato.
+Una nuova installazione parte senza profili predefiniti.
 
-SCORCIATOIE INIZIALI
-Ctrl+Alt+F1: Gioco
-Ctrl+Alt+F2: Lavoro
-Ctrl+Alt+F3: Due schermi
-Ctrl+Alt+F4: Solo portatile
-Ctrl+Alt+F10: interruttore tra i due profili scelti
-Sono personalizzabili: scegli Nessuna per disattivarne una.
-Le combinazioni duplicate nell'app sono rifiutate. Se una combinazione e
-occupata da Windows o altre app, compare un messaggio in basso: cambiala
-oppure usa i pulsanti. Le scorciatoie richiedono l'app in esecuzione.
-Quando cambi profilo da scorciatoia o dal menu dell'icona, la finestra
-principale rimane nel tray. Se Conferma dopo il cambio e attiva, compare
-solo la finestra temporanea di conferma; altrimenti il cambio e silenzioso.
+TRAY E AVVIO CON WINDOWS
+Minimizza per lasciare attive protezione e scorciatoie vicino all'orologio.
+Le azioni da tray o scorciatoia lasciano nascosta la finestra principale.
+Avvia con Windows (minimizzato) e facoltativo e vale per il tuo account.
+Se sposti l'EXE, disabilita e riabilita l'opzione dalla nuova posizione.
 
-AREA VICINO ALL'OROLOGIO
-Minimizza per lasciare l'app nell'area di notifica con i tasti attivi.
-Doppio clic sull'icona riapre la finestra; clic destro mostra i profili.
-Esci o la X chiudono l'app: la configurazione mantenuta resta attiva.
+AGGIORNAMENTI
+Premi Aggiornamenti, poi Scarica e riavvia quando disponibile. Il download da
+GitHub viene verificato con SHA-256, intestazione x64 e versione incorporata.
+Profili e storico restano; l'eseguibile precedente viene conservato con suffisso
+.previous. Il controllo automatico all'avvio e facoltativo e avviene al massimo
+una volta al giorno dopo un controllo riuscito. L'installazione richiede il
+comando esplicito Scarica e riavvia. Le versioni 2.1.0 e precedenti richiedono
+un primo download manuale per avere l'aggiornamento integrato.
 
-RICONOSCIMENTO MONITOR
-La tabella mostra nome, interno/esterno, stato, risoluzione desktop,
-frequenza del segnale e GPU di uscita. Include i monitor collegati ma
-disattivati quando il driver li segnala disponibili. Si aggiorna agli eventi
-di Windows; puoi premere Aggiorna monitor manualmente.
-L'uscita puo essere gestita da Intel mentre NVIDIA esegue i giochi:
-non servono modifiche ai pannelli Intel o NVIDIA per utilizzare l'app.
+DATI
+%LOCALAPPDATA%\MonitorSwitch\profiles.xml - profili, storico e nomi
+%LOCALAPPDATA%\MonitorSwitch\pending-display.bin - cambio da recuperare
+%LOCALAPPDATA%\MonitorSwitch\errors.log - diagnostica
+Non cancellare un backup in sospeso. Se necessario ricollega i monitor originali
+e riapri l'app. Controlla i dati personali nei log prima di condividerli.
 
-PROTEZIONE E DATI
-Prima di ogni cambio viene conservata la configurazione precedente.
-Un processo separato sorveglia il cambio fino al completamento, poi termina.
-Errore, mancata conferma o uscita del processo principale prima del
-completamento fanno tentare il ripristino. Un backup rimasto viene recuperato
-alla successiva apertura, prima di consentire altri cambi.
-Il recupero puo fallire se i monitor o gli identificatori del driver sono
-cambiati: ricollega i monitor originali e riapri l'app. Il backup rimane
-disponibile finche il recupero non riesce.
-
-Profili: %LOCALAPPDATA%\MonitorSwitch\profiles.xml
-Backup pendente: %LOCALAPPDATA%\MonitorSwitch\pending-display.bin
-Errori: %LOCALAPPDATA%\MonitorSwitch\errors.log
-Non eliminare il backup di un cambio non ancora recuperato.
-
-AGGIORNAMENTI DAL PROGRAMMA
-Premi Aggiornamenti nella finestra o nel menu dell'icona nel tray.
-Il programma interroga la release stabile piu recente di carellice/MonitorSwitch
-su GitHub. Se e piu nuova, mostra le note e il pulsante Scarica e riavvia.
-Solo premendo quel pulsante vengono scaricati e installati gli aggiornamenti.
-Non serve un account GitHub.
-
-Il file viene controllato tramite SHA-256 fornito dall'API GitHub, formato
-Windows x64 e versione incorporata. Un processo temporaneo aspetta la chiusura
-dell'app, sostituisce l'eseguibile e riavvia MonitorSwitch. I profili restano
-invariati; se l'app era nel tray viene riavviata nel tray.
-La copia precedente rimane accanto al programma come MonitorSwitch.exe.previous.
-Se il nuovo processo termina prima della conferma di avvio, viene ripristinata.
-I file temporanei di aggiornamento sono in %LOCALAPPDATA%\MonitorSwitch\updates.
-La cartella dell'eseguibile deve essere scrivibile dall'utente.
-
-Nel tray puoi attivare/disattivare Controlla aggiornamenti all'avvio.
-Il controllo automatico riuscito si ripete al massimo una volta ogni 24 ore;
-il pulsante manuale permette sempre un nuovo controllo. I controlli automatici
-non installano nulla senza la scelta dell'utente.
-Le versioni 2.1.0 e precedenti richiedono un primo download manuale della 2.2.0
-o successiva per ottenere questa funzione.
-
-LIMITI
-Le modalita rapide richiamano le configurazioni compatibili di Windows,
-come Win+P. Solo esterni puo attivare piu schermi esterni: per sceglierne
-uno preciso salva una configurazione personalizzata.
-Duplicare non garantisce il 16:9: dipende dalla risoluzione comune e da
-monitor/driver. Il pannello del portatile puo avere un formato nativo diverso.
-I profili salvano monitor attivi, disposizione, risoluzioni, orientamento,
-frequenze e timing. Non gestiscono HDR, luminosita, DPI, colori, VRR o
-impostazioni interne dei giochi. Lo scaling personalizzato resta al driver.
-L'app non emula monitor e non nasconde le risoluzioni ai giochi.
-
-VERIFICHE E SVILUPPO
-Compila con: powershell -File .\build.ps1
-94 controlli automatici superati senza cambiare schermi; rilevamento dei due
-monitor e validazione driver di profilo acquisito, estensione con risoluzioni
-native distinte e duplicazione a 1920 x 1080 riusciti.
-I cambi reali tra tutte le modalita richiedono una prova sul PC.
-
-Opzioni sviluppatore, con percorsi di output assoluti:
-MonitorSwitch.exe --self-test percorso-report.txt
-MonitorSwitch.exe --diagnose percorso-diagnostica.txt
-MonitorSwitch.exe --validate-current percorso-validazione.txt
-MonitorSwitch.exe --validate-editor percorso-validazione-editor.txt
-MonitorSwitch.exe --render-preview percorso-anteprima.png
-MonitorSwitch.exe --render-dialogs cartella-anteprime
-MonitorSwitch.exe --test-update-download percorso-report-download.txt
-L'ultima opzione scarica e verifica una release per test senza installarla.
-Le prime tre verificano/leggono senza applicare cambi video.
-
-https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setdisplayconfig
+HDR, VRR, DPI, luminosita e profili colore non vengono gestiti. Le modalita
+richieste devono essere supportate dall'hardware. I binari non sono firmati.
+Codice e release: https://github.com/carellice/MonitorSwitch
+Licenza MIT.

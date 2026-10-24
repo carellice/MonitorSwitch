@@ -28,11 +28,6 @@ namespace MonitorSwitch
         }
         public Shortcut Value { get { uint k = keys[key.SelectedIndex]; return new Shortcut { Key = k, Modifiers = k == 0 ? 0 : ModifierValues[modifiers.SelectedIndex] }; } }
     }
-    internal sealed class ModeChoice
-    {
-        public int Value; public string Label;
-        public override string ToString() { return Label; }
-    }
     internal sealed class ShortcutDialog : Form
     {
         private readonly ShortcutEditor editor;
