@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.0.1
+
+- Fixed profile switching on Windows virtual-mode display paths, including Intel-driven ultrawide monitors. Source, target and desktop-image indexes are decoded independently and the desired desktop image is supplied explicitly instead of inheriting a previous surface.
+- Retained native physical signal timings for GPU aspect scaling while setting the exact requested desktop dimensions. Profiles without saved timings can use the currently connected monitor's preferred signal.
+- Verified virtual desktop image geometry as well as outer path scaling, and preserved it in rollback snapshots while remaining compatible with older snapshots.
+- Waited for two consecutive matching readings after a change; transient topology/query results no longer cause an immediate rollback. Persistent mismatches still roll back and report requested/received settings.
+- Added regression tests and a read-only `--validate-profiles <report>` diagnostic command. No profile recreation or settings migration is required.
+
 ## 3.0.0
 
 - Redesigned the app around persistent monitor history, including disconnected interfaces remembered by Windows, and aliases shared by all profiles.

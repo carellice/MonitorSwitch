@@ -37,6 +37,7 @@ namespace MonitorSwitch
         {
             uint width, height; LayoutEditor.Resolution(Resolution.Text, out width, out height);
             MonitorSetting result = Baseline.Copy(); result.Scaling = 4; result.Width = width; result.Height = height;
+            result.DesktopImage = null;
             if (result.Timing.Active.Width < width || result.Timing.Active.Height < height) result.Timing = new Signal();
             return result;
         }

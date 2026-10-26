@@ -10,6 +10,9 @@ namespace MonitorSwitch
     [StructLayout(LayoutKind.Sequential)] internal struct Luid { public uint Low; public int High; }
     [StructLayout(LayoutKind.Sequential)] public struct Rational { public uint Num, Den; }
     [StructLayout(LayoutKind.Sequential)] internal struct Position { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] internal struct DisplayRect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] internal struct DesktopImageInfo
+    { public Position SourceSize; public DisplayRect Region, Clip; }
     [StructLayout(LayoutKind.Sequential)] public struct Region { public uint Width, Height; }
     [StructLayout(LayoutKind.Sequential)] internal struct SourceMode { public uint Width, Height, Format; public Position Position; }
     [StructLayout(LayoutKind.Sequential)] public struct Signal
@@ -18,6 +21,7 @@ namespace MonitorSwitch
     {
         [FieldOffset(0)] public uint Type; [FieldOffset(4)] public uint Id; [FieldOffset(8)] public Luid Adapter;
         [FieldOffset(16)] public SourceMode Source; [FieldOffset(16)] public Signal Target;
+        [FieldOffset(16)] public DesktopImageInfo DesktopImage;
     }
     [StructLayout(LayoutKind.Sequential)] internal struct PathSource { public Luid Adapter; public uint Id, ModeIndex, Status; }
     [StructLayout(LayoutKind.Sequential)] internal struct PathTarget
@@ -64,13 +68,17 @@ namespace MonitorSwitch
                 throw new InvalidDataException("Configurazione video non valida.");
             foreach (DisplayPath p in Paths)
             {
-                if (p.Source.ModeIndex >= Modes.Length || p.Target.ModeIndex >= Modes.Length)
+                uint sourceIndex = Native.SourceIndex(p), targetIndex = Native.TargetIndex(p), imageIndex = Native.ImageIndex(p);
+                if (sourceIndex >= Modes.Length || targetIndex >= Modes.Length)
                     throw new InvalidDataException("Configurazione video incompleta.");
-                Mode s = Modes[p.Source.ModeIndex], t = Modes[p.Target.ModeIndex];
+                Mode s = Modes[sourceIndex], t = Modes[targetIndex];
                 if (s.Type != 1 || t.Type != 2 || s.Id != p.Source.Id || t.Id != p.Target.Id ||
                     Native.AdapterKey(s.Adapter) != Native.AdapterKey(p.Source.Adapter) || Native.AdapterKey(t.Adapter) != Native.AdapterKey(p.Target.Adapter) ||
                     s.Source.Width == 0 || s.Source.Height == 0 || t.Target.Active.Width == 0 || t.Target.Active.Height == 0)
                     throw new InvalidDataException("Dati video incoerenti.");
+                if (imageIndex != UInt32.MaxValue && (imageIndex >= Modes.Length || Modes[imageIndex].Type != 3 ||
+                    Modes[imageIndex].Id != p.Target.Id || Native.AdapterKey(Modes[imageIndex].Adapter) != Native.AdapterKey(p.Target.Adapter)))
+                    throw new InvalidDataException("Immagine desktop virtuale non valida.");
             }
         }
         public List<MonitorSetting> Capture(List<MonitorInfo> monitors)
@@ -81,10 +89,12 @@ namespace MonitorSwitch
                 MonitorInfo monitor = monitors.FirstOrDefault(m => m.Candidates.Any(c => Native.TargetKey(c) == Native.TargetKey(p)));
                 if (monitor == null || String.IsNullOrEmpty(monitor.Key)) throw new InvalidOperationException("Impossibile identificare un monitor. Aggiorna l'elenco e riprova.");
                 string source = Native.SourceKey(p); if (!groups.ContainsKey(source)) groups.Add(source, groups.Count);
-                SourceMode s = Modes[p.Source.ModeIndex].Source; Signal t = Modes[p.Target.ModeIndex].Target;
+                SourceMode s = Modes[Native.SourceIndex(p)].Source; Signal t = Modes[Native.TargetIndex(p)].Target;
+                uint imageIndex = Native.ImageIndex(p);
                 result.Add(new MonitorSetting { DevicePath = monitor.Key, Name = monitor.Name, Group = groups[source],
                     Width = s.Width, Height = s.Height, X = s.Position.X, Y = s.Position.Y, Rotation = p.Target.Rotation,
-                    Scaling = p.Target.Scaling, RefreshNum = t.VSync.Num, RefreshDen = t.VSync.Den, Timing = t });
+                    Scaling = p.Target.Scaling, RefreshNum = t.VSync.Num, RefreshDen = t.VSync.Den, Timing = t,
+                    DesktopImage = imageIndex == UInt32.MaxValue ? (DesktopImageInfo?)null : Modes[imageIndex].DesktopImage });
             }
             return result;
         }
@@ -97,8 +107,8 @@ namespace MonitorSwitch
         private bool Cloned()
         {
             if (Paths.Length < 2) return false;
-            SourceMode first = Modes[Paths[0].Source.ModeIndex].Source;
-            return Paths.All(p => { SourceMode s = Modes[p.Source.ModeIndex].Source; return s.Width == first.Width && s.Height == first.Height && s.Position.X == first.Position.X && s.Position.Y == first.Position.Y; });
+            SourceMode first = Modes[Native.SourceIndex(Paths[0])].Source;
+            return Paths.All(p => { SourceMode s = Modes[Native.SourceIndex(p)].Source; return s.Width == first.Width && s.Height == first.Height && s.Position.X == first.Position.X && s.Position.Y == first.Position.Y; });
         }
     }
 
@@ -107,6 +117,7 @@ namespace MonitorSwitch
         public string Key, Name, Adapter; public bool Internal, Active;
         public uint Width, Height; public double Hz;
         public uint PreferredWidth, PreferredHeight;
+        public Signal PreferredTiming;
         public readonly List<DisplayPath> Candidates = new List<DisplayPath>();
         public MonitorSetting Baseline;
         public string Summary { get { return (Internal ? "Portatile" : "Esterno") + "  ·  " + (Active ? Width + " × " + Height + "  ·  " + Hz.ToString("0.##") + " Hz" : "Collegato, non attivo"); } }
@@ -125,6 +136,13 @@ namespace MonitorSwitch
         public static string AdapterKey(Luid id) { return id.High + ":" + id.Low; }
         public static string SourceKey(DisplayPath p) { return AdapterKey(p.Source.Adapter) + ":" + p.Source.Id; }
         public static string TargetKey(DisplayPath p) { return AdapterKey(p.Target.Adapter) + ":" + p.Target.Id; }
+        public static bool VirtualMode(DisplayPath p) { return (p.Flags & 8) != 0; }
+        // With virtual-mode awareness, source/target indexes occupy the upper
+        // 16 bits; clone-group/desktop-image indexes occupy the lower 16 bits.
+        public static uint SourceIndex(DisplayPath p) { return VirtualMode(p) ? (p.Source.ModeIndex >> 16) == 0xffff ? UInt32.MaxValue : p.Source.ModeIndex >> 16 : p.Source.ModeIndex; }
+        public static uint TargetIndex(DisplayPath p) { return VirtualMode(p) ? (p.Target.ModeIndex >> 16) == 0xffff ? UInt32.MaxValue : p.Target.ModeIndex >> 16 : p.Target.ModeIndex; }
+        public static uint ImageIndex(DisplayPath p) { return VirtualMode(p) && (p.Target.ModeIndex & 0xffff) != 0xffff ? p.Target.ModeIndex & 0xffff : UInt32.MaxValue; }
+        internal static uint AwarenessFlags(DisplayPath[] paths) { return paths.Any(VirtualMode) ? 0x8000u : 0; }
         public static bool IsInternal(uint technology) { return technology == 0x80000000 || technology == 6 || technology == 11 || technology == 13; }
         public static void Check(int code, string action)
         { if (code != 0) throw new InvalidOperationException(action + ": " + new Win32Exception(code).Message + " (" + code + ")."); }
@@ -142,10 +160,10 @@ namespace MonitorSwitch
             }
             throw new InvalidOperationException("I monitor stanno cambiando. Attendi un momento e riprova.");
         }
-        public static DisplayState Read() { DisplayState state = Query(2); state.Check(); return state; }
+        public static DisplayState Read() { DisplayState state = Query(2 | 0x10); state.Check(); return state; }
         public static List<MonitorInfo> Inventory(DisplayState active)
         {
-            DisplayState all = Query(1); var found = new Dictionary<string, MonitorInfo>(StringComparer.OrdinalIgnoreCase);
+            DisplayState all = Query(1 | 0x10); var found = new Dictionary<string, MonitorInfo>(StringComparer.OrdinalIgnoreCase);
             foreach (DisplayPath p in all.Paths.OrderByDescending(p => (p.Flags & 1) != 0))
             {
                 if (p.Target.Available == 0) continue;
@@ -161,7 +179,7 @@ namespace MonitorSwitch
                 monitor.Candidates.Add(p);
                 foreach (DisplayPath ap in active.Paths.Where(a => TargetKey(a) == TargetKey(p)))
                 {
-                    SourceMode s = active.Modes[ap.Source.ModeIndex].Source; Signal t = active.Modes[ap.Target.ModeIndex].Target;
+                    SourceMode s = active.Modes[SourceIndex(ap)].Source; Signal t = active.Modes[TargetIndex(ap)].Target;
                     monitor.Active = true; monitor.Width = s.Width; monitor.Height = s.Height;
                     monitor.Hz = t.VSync.Den == 0 ? 0 : (double)t.VSync.Num / t.VSync.Den;
                 }
@@ -173,6 +191,7 @@ namespace MonitorSwitch
                 var preferred = new PreferredMode { Type = 3, Size = (uint)Marshal.SizeOf(typeof(PreferredMode)), Adapter = path.Target.Adapter, Id = path.Target.Id };
                 bool known = GetPreferredMode(ref preferred) == 0;
                 monitor.PreferredWidth = known ? preferred.Width : 0; monitor.PreferredHeight = known ? preferred.Height : 0;
+                monitor.PreferredTiming = known ? preferred.Timing : new Signal();
                 monitor.Baseline = new MonitorSetting { DevicePath = monitor.Key, Name = monitor.Name, Group = result.IndexOf(monitor),
                     Width = known ? preferred.Width : 1920, Height = known ? preferred.Height : 1080, Rotation = 1, Scaling = 4,
                     RefreshNum = known && preferred.Timing.VSync.Num > 0 ? preferred.Timing.VSync.Num : 60,
@@ -228,13 +247,13 @@ namespace MonitorSwitch
             Check(SetDisplayConfig(0, null, 0, null, (uint)topology | 0x80), "Cambio modalita schermi");
         }
         public static void Apply(DisplayState state, bool persist)
-        { state.Check(); Check(SetDisplayConfig((uint)state.Paths.Length, state.Paths, (uint)state.Modes.Length, state.Modes, 0x20u | 0x80u | (persist ? 0x200u : 0)), "Ripristino configurazione"); }
+        { state.Check(); Check(SetDisplayConfig((uint)state.Paths.Length, state.Paths, (uint)state.Modes.Length, state.Modes, 0x20u | 0x80u | AwarenessFlags(state.Paths) | (persist ? 0x200u : 0)), "Ripristino configurazione"); }
         public static void Validate(DisplayState state)
-        { state.Check(); Check(SetDisplayConfig((uint)state.Paths.Length, state.Paths, (uint)state.Modes.Length, state.Modes, 0x20u | 0x40u), "Verifica configurazione nativa"); }
+        { state.Check(); Check(SetDisplayConfig((uint)state.Paths.Length, state.Paths, (uint)state.Modes.Length, state.Modes, 0x20u | 0x40u | AwarenessFlags(state.Paths)), "Verifica configurazione nativa"); }
         internal static uint PlanFlags(bool validate)
         { return 0x20u | (validate ? 0x40u : 0x80u | 0x100u); }
         public static void Plan(DisplayPlan plan, bool validate)
-        { Check(SetDisplayConfig((uint)plan.Paths.Length, plan.Paths, (uint)plan.Modes.Length, plan.Modes, PlanFlags(validate)), validate ? "Verifica profilo" : "Applicazione profilo"); }
+        { Check(SetDisplayConfig((uint)plan.Paths.Length, plan.Paths, (uint)plan.Modes.Length, plan.Modes, PlanFlags(validate) | AwarenessFlags(plan.Paths)), validate ? "Verifica profilo" : "Applicazione profilo"); }
 
         // Bind saved physical monitors to CURRENT adapter/source identifiers. LUIDs
         // from a previous boot are deliberately never used as persistent identities.
@@ -265,22 +284,47 @@ namespace MonitorSwitch
                 foreach (MonitorSetting setting in groups[i])
                 {
                     DisplayPath path = devices[setting].Candidates.First(p => SourceKey(p) == assigned[i]);
-                    path.Flags = 1; path.Source.ModeIndex = index; path.Target.ModeIndex = UInt32.MaxValue;
+                    path.Flags = 1 | (path.Flags & 8);
+                    path.Source.ModeIndex = VirtualMode(path) ? (index << 16) | 0xffffu : index;
+                    path.Target.ModeIndex = UInt32.MaxValue;
                     path.Target.Rotation = setting.Rotation;
                     // Vendor custom scaling requires a private interface; use the
                     // driver's saved preference rather than submitting CUSTOM.
                     path.Target.Scaling = setting.Scaling == 5 ? 128u : setting.Scaling;
                     path.Target.Refresh = new Rational { Num = setting.RefreshNum, Den = setting.RefreshDen };
                     path.Target.Scanline = 0;
-                    if (setting.Timing.PixelRate != 0)
+                    Signal timing = TimingFor(setting, devices[setting]);
+                    if (timing.PixelRate != 0)
                     {
-                        path.Target.ModeIndex = (uint)modes.Count;
-                        modes.Add(new Mode { Type = 2, Adapter = path.Target.Adapter, Id = path.Target.Id, Target = setting.Timing });
+                        path.Target.ModeIndex = VirtualMode(path) ? ((uint)modes.Count << 16) | 0xffffu : (uint)modes.Count;
+                        modes.Add(new Mode { Type = 2, Adapter = path.Target.Adapter, Id = path.Target.Id, Target = timing });
+                    }
+                    if (VirtualMode(path))
+                    {
+                        // Explicitly reset the virtual desktop surface as well as
+                        // its source mode. Reusing the old desktop image can keep
+                        // the ultrawide surface when a 16:9 profile is requested.
+                        path.Target.ModeIndex = (path.Target.ModeIndex & 0xffff0000u) | (uint)modes.Count;
+                        modes.Add(new Mode { Type = 3, Adapter = path.Target.Adapter, Id = path.Target.Id,
+                            DesktopImage = new DesktopImageInfo { SourceSize = new Position { X = (int)setting.Width, Y = (int)setting.Height },
+                                Region = new DisplayRect { Right = (int)setting.Width, Bottom = (int)setting.Height },
+                                Clip = new DisplayRect { Right = (int)setting.Width, Bottom = (int)setting.Height } } });
                     }
                     paths.Add(path);
                 }
             }
             return new DisplayPlan { Paths = paths.ToArray(), Modes = modes.ToArray() };
+        }
+        private static Signal TimingFor(MonitorSetting setting, MonitorInfo monitor)
+        {
+            if (setting.Timing.PixelRate != 0) return setting.Timing;
+            var candidates = new List<Signal>();
+            if (monitor.Baseline != null) candidates.Add(monitor.Baseline.Timing);
+            candidates.Add(monitor.PreferredTiming);
+            foreach (Signal timing in candidates)
+                if (timing.PixelRate != 0 && timing.VSync.Den != 0 && Math.Abs((double)timing.VSync.Num / timing.VSync.Den - (double)setting.RefreshNum / setting.RefreshDen) <= 0.5)
+                    return timing;
+            return new Signal();
         }
         private static bool Assign(List<List<string>> options, string[] assigned, HashSet<string> used, int i, ref int budget)
         {
@@ -319,10 +363,21 @@ namespace MonitorSwitch
         }
         public static bool PreservesAspect(MonitorSetting setting)
         {
+            uint sourceWidth = setting.Width, sourceHeight = setting.Height;
+            if (setting.DesktopImage.HasValue)
+            {
+                DesktopImageInfo image = setting.DesktopImage.Value;
+                long regionWidth = (long)image.Region.Right - image.Region.Left, regionHeight = (long)image.Region.Bottom - image.Region.Top;
+                long clipWidth = (long)image.Clip.Right - image.Clip.Left, clipHeight = (long)image.Clip.Bottom - image.Clip.Top;
+                if (image.SourceSize.X <= 0 || image.SourceSize.Y <= 0 || regionWidth <= 0 || regionHeight <= 0 ||
+                    image.Region.Left < 0 || image.Region.Top < 0 || image.Region.Right > image.SourceSize.X || image.Region.Bottom > image.SourceSize.Y ||
+                    clipWidth != setting.Width || clipHeight != setting.Height || regionWidth * clipHeight != regionHeight * clipWidth) return false;
+                sourceWidth = (uint)image.SourceSize.X; sourceHeight = (uint)image.SourceSize.Y;
+            }
             if (setting.Scaling == 2 || setting.Scaling == 4) return true;
             uint width = setting.Timing.Active.Width, height = setting.Timing.Active.Height;
             if (setting.Rotation == 2 || setting.Rotation == 4) { uint swap = width; width = height; height = swap; }
-            return width > 0 && height > 0 && (ulong)setting.Width * height == (ulong)setting.Height * width;
+            return width > 0 && height > 0 && (ulong)sourceWidth * height == (ulong)sourceHeight * width;
         }
     }
 

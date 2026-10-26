@@ -49,6 +49,10 @@ These limits follow the Windows APIs: [desktop scaling and DirectX games](https:
 
 **Disattiva profilo** stops protection and clears the active selection while leaving the screens as configured. Closing the app keeps the display configuration and stops protection. On restart, a saved protected profile is rearmed only if it still matches the current configuration; startup never applies a different layout automatically.
 
+## Profile switching fix in 3.0.1
+
+Virtual-mode display paths are handled explicitly, including their separate desktop image. Profile changes wait for two matching readings before confirmation. Existing profiles do not need to be recreated. Genuine mismatches still roll back and now show the requested and received resolution, refresh rate, placement, scaling and signal dimensions.
+
 ## Upgrading from 2.x
 
 Existing profiles, shortcuts and update preferences are preserved. The original settings file is backed up as `profiles.xml.v1.bak` before the first migration save. Exact saved layouts remain usable. Old generic profiles such as duplicate/extend/external-only show **Configura** until edited to choose physical monitors. Saving a profile in the new editor uses explicit monitors and an extended layout. Legacy profiles have protection disabled until you enable it. The old quick topology buttons and two-profile switch have been removed; their reserved switch shortcut is released.
@@ -77,7 +81,7 @@ Use the .NET Framework C# compiler included with Windows:
 
 `dist/MonitorSwitch.exe` is the development build. `release/` contains the standalone EXE, portable ZIP and checksums. There are no NuGet or external runtime dependencies.
 
-Self-tests cover persistence, legacy migration, aliases, disconnected history, source routing, exact modes, aspect verification, active-profile persistence, resolution drift, reconnection, conflict limits, rollback and the updater. They do not apply display changes. `--validate-current <report>` and `--validate-editor <report>` use driver validation without applying modes. Physical driver/game behavior still requires hardware testing.
+Self-tests cover persistence, legacy migration, aliases, disconnected history, source routing, exact modes, aspect verification, active-profile persistence, resolution drift, reconnection, conflict limits, rollback and the updater. They do not apply display changes. `--validate-current <report>`, `--validate-editor <report>` and `--validate-profiles <report>` use driver validation without applying modes. Physical driver/game behavior still requires hardware testing.
 
 Version tags such as `v3.0.0` trigger Windows build/tests and the GitHub release workflow. Add release notes at `docs/releases/<tag>.md`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 

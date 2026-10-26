@@ -1,4 +1,4 @@
-MonitorSwitch 3.0.0 - Windows 10/11 x64
+MonitorSwitch 3.0.1 - Windows 10/11 x64
 
 Extract this package and run MonitorSwitch.exe. No installation, administrator
 rights or additional runtime packages are required. The interface is Italian.

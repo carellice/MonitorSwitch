@@ -21,6 +21,9 @@ namespace MonitorSwitch
         public uint RefreshNum { get; set; }
         public uint RefreshDen { get; set; }
         public Signal Timing { get; set; }
+        // Observed virtual desktop geometry is used for verification, never
+        // persisted as a constraint on a future edited profile.
+        internal DesktopImageInfo? DesktopImage { get; set; }
         public MonitorSetting Copy() { return (MonitorSetting)MemberwiseClone(); }
     }
     public sealed class Shortcut

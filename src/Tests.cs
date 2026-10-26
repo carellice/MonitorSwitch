@@ -47,6 +47,7 @@ namespace MonitorSwitch
             {
                 Check(Marshal.SizeOf(typeof(DisplayPath)) == 72, "Path ABI"); Check(Marshal.SizeOf(typeof(Mode)) == 64, "Mode ABI");
                 Check(Marshal.SizeOf(typeof(Signal)) == 48, "Signal ABI"); Check(Marshal.SizeOf(typeof(TargetName)) == 420, "Target identity ABI");
+                Check(Marshal.SizeOf(typeof(DesktopImageInfo)) == 40, "Virtual desktop image ABI");
                 Check(Marshal.SizeOf(typeof(SourceName)) == 84, "Source ABI"); Check(Marshal.SizeOf(typeof(DisplayDevice)) == 840, "GPU name ABI");
                 Check(Marshal.SizeOf(typeof(DeviceMode)) == 220, "Resolution DEVMODEW ABI");
                 Check(Marshal.SizeOf(typeof(KnownMonitors.InterfaceData)) == 32 && Marshal.SizeOf(typeof(KnownMonitors.DeviceData)) == 32, "SetupAPI x64 monitor interface ABI");
@@ -181,6 +182,54 @@ namespace MonitorSwitch
                 Check(Native.MatchesProtected(wanted, new List<MonitorSetting> { stretched }), "Identity scaling at selected signal aspect is accepted");
                 stretched.Rotation = 2; stretched.Width = 1080; stretched.Height = 1920;
                 Check(Native.PreservesAspect(stretched), "Portrait signal aspect accounts for rotation");
+                var virtualMonitor = Monitor("virtual-panel", 0, 0);
+                var virtualState = StateFixture(); virtualState.Modes[0].Source.Width = 1920; virtualState.Modes[0].Source.Height = 1080;
+                virtualState.Paths[0].Flags = 9; virtualState.Paths[0].Source.ModeIndex = 0xffff; virtualState.Paths[0].Target.ModeIndex = (1u << 16) | 2u;
+                Array.Resize(ref virtualState.Modes, 3);
+                virtualState.Modes[2] = new Mode { Type = 3, DesktopImage = new DesktopImageInfo { SourceSize = new Position { X = 3440, Y = 1440 },
+                    Region = new DisplayRect { Left = 440, Right = 3000, Bottom = 1440 }, Clip = new DisplayRect { Right = 1920, Bottom = 1080 } } };
+                virtualState.Check(); var virtualLayout = virtualState.Capture(new List<MonitorInfo> { virtualMonitor });
+                Check(Native.SourceIndex(virtualState.Paths[0]) == 0 && Native.TargetIndex(virtualState.Paths[0]) == 1 && Native.ImageIndex(virtualState.Paths[0]) == 2, "Packed virtual source, target and desktop indexes are decoded separately");
+                Check(virtualLayout[0].Width == 1920 && virtualLayout[0].Height == 1080 && virtualLayout[0].DesktopImage.HasValue && Native.PreservesAspect(virtualLayout[0]), "Virtual letterboxed desktop is verified independently of identity signal scaling");
+                var virtualImage = virtualLayout[0].DesktopImage.Value; virtualImage.Region.Left = 0; virtualImage.Region.Right = 3440;
+                virtualLayout[0].DesktopImage = virtualImage;
+                Check(!Native.PreservesAspect(virtualLayout[0]), "Stretching inside a virtual desktop cannot masquerade as preserved aspect");
+                virtualLayout[0].Scaling = 4;
+                Check(!Native.PreservesAspect(virtualLayout[0]), "Aspect scaling on the outer path cannot excuse a stretched virtual image");
+                virtualImage.Region.Left = 440; virtualImage.Region.Right = 3000; virtualImage.Clip.Right = 1600; virtualLayout[0].DesktopImage = virtualImage;
+                Check(!Native.PreservesAspect(virtualLayout[0]), "A virtual image that crops desktop pixels is rejected");
+                string virtualBackup = Path.Combine(folder, "virtual.bin"); Snapshot.Save(virtualBackup, virtualState); var virtualRestored = Snapshot.Load(virtualBackup);
+                Check(virtualRestored.Modes[2].DesktopImage.Region.Left == 440 && Native.SourceIndex(virtualRestored.Paths[0]) == 0 && Native.AwarenessFlags(virtualRestored.Paths) == 0x8000 && Native.AwarenessFlags(state.Paths) == 0, "Rollback preserves virtual desktop geometry and selects compatible API flags for both snapshot formats");
+                virtualState.Paths[0].Source.ModeIndex = UInt32.MaxValue;
+                Reject(delegate { virtualState.Check(); }, "Invalid packed virtual source mode is rejected before recovery");
+                var newVirtualRoute = Monitor("virtual-panel", 20, 4); newVirtualRoute.Candidates[0] = new DisplayPath { Source = newVirtualRoute.Candidates[0].Source, Target = newVirtualRoute.Candidates[0].Target, Flags = 9 };
+                virtualLayout[0].DesktopImage = null; virtualLayout[0].Scaling = 4;
+                plan = Native.BuildPlan(virtualLayout, new List<MonitorInfo> { newVirtualRoute });
+                Check(plan.Modes.Length == 3 && Native.VirtualMode(plan.Paths[0]) && Native.SourceIndex(plan.Paths[0]) == 0 && Native.TargetIndex(plan.Paths[0]) == 1 && Native.ImageIndex(plan.Paths[0]) == 2 && (plan.Paths[0].Source.ModeIndex & 0xffff) == 0xffff, "Virtual plan retains capability flags, explicit source index and invalid clone group");
+                Check(plan.Modes[2].DesktopImage.SourceSize.X == 1920 && plan.Modes[2].DesktopImage.Region.Right == 1920 && plan.Modes[2].DesktopImage.Clip.Right == 1920 && plan.Modes[1].Target.Active.Width == 3440, "1080p profile resets the virtual surface instead of inheriting the old ultrawide image while retaining physical timings");
+                var noTiming = virtualLayout[0].Copy(); noTiming.Timing = new Signal(); newVirtualRoute.PreferredTiming = virtualLayout[0].Timing;
+                plan = Native.BuildPlan(new List<MonitorSetting> { noTiming }, new List<MonitorInfo> { newVirtualRoute });
+                Check(plan.Modes[Native.TargetIndex(plan.Paths[0])].Target.PixelRate == virtualLayout[0].Timing.PixelRate, "Virtual profiles without saved timings use the current monitor preferred physical signal");
+                newVirtualRoute.PreferredTiming.VSync.Num = 60; newVirtualRoute.Baseline = virtualLayout[0].Copy();
+                plan = Native.BuildPlan(new List<MonitorSetting> { noTiming }, new List<MonitorInfo> { newVirtualRoute });
+                Check(plan.Modes[Native.TargetIndex(plan.Paths[0])].Target.VSync.Num == 120, "Fallback timing keeps the requested refresh instead of pinning an incompatible preferred signal");
+                newVirtualRoute.Baseline = null;
+                plan = Native.BuildPlan(new List<MonitorSetting> { noTiming }, new List<MonitorInfo> { newVirtualRoute });
+                Check(Native.TargetIndex(plan.Paths[0]) == UInt32.MaxValue, "Driver chooses the signal when no observed timing matches the profile refresh");
+                int reads = 0, pauses = 0;
+                var oldDesktop = Setting("panel", 0, 0); oldDesktop.Width = 2580;
+                DisplayObservation settled = DisplayVerification.WaitFor(wanted, delegate { reads++; return new DisplayObservation { Layout = reads == 1 ? new List<MonitorSetting> { oldDesktop } : wanted }; }, delegate { pauses++; }, 5);
+                Check(reads == 3 && pauses == 2 && settled.Layout == wanted, "Post-apply verification waits for two matching samples after stale driver state");
+                reads = 0;
+                DisplayVerification.WaitFor(wanted, delegate { reads++; if (reads == 1) throw new InvalidOperationException("Display is reconnecting"); return new DisplayObservation { Layout = wanted }; }, delegate { }, 4);
+                Check(reads == 3, "A transient query error is retried during display settling");
+                reads = 0;
+                DisplayVerification.WaitFor(wanted, delegate { reads++; return new DisplayObservation { Layout = reads == 2 ? new List<MonitorSetting> { oldDesktop } : wanted }; }, delegate { }, 5);
+                Check(reads == 4, "A single transient match is not accepted as a settled display configuration");
+                bool mismatchRejected = false;
+                try { DisplayVerification.WaitFor(wanted, delegate { return new DisplayObservation { Layout = new List<MonitorSetting> { oldDesktop } }; }, delegate { }, 3); }
+                catch (InvalidOperationException ex) { mismatchRejected = ex.Message.Contains("1920 x 1080") && ex.Message.Contains("2580 x 1080"); }
+                Check(mismatchRejected, "Persistent resolution substitution is rejected with requested and received values");
                 var history = Settings.Defaults(); var now = DateTime.UtcNow;
                 var live = Monitor("persistent", 1, 1); live.Baseline = Setting("persistent", 0, 0); live.Active = true;
                 Check(MonitorHistory.Observe(history, new List<MonitorInfo> { live }, now, false), "Connected monitor added to persistent history");

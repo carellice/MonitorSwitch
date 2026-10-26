@@ -32,7 +32,7 @@ namespace MonitorSwitch
                 }
                 catch (Exception ex) { File.WriteAllText(args[1], ex.ToString()); return 1; }
             }
-            if (args.Length == 2 && (args[0] == "--diagnose" || args[0] == "--validate-current" || args[0] == "--validate-editor"))
+            if (args.Length == 2 && (args[0] == "--diagnose" || args[0] == "--validate-current" || args[0] == "--validate-editor" || args[0] == "--validate-profiles"))
             {
                 try
                 {
@@ -41,6 +41,8 @@ namespace MonitorSwitch
                     string report = "MonitorSwitch " + Updates.CurrentLabel + "\r\nModalita: " + Profile.ModeLabel(state.Topology()) + "\r\n" +
                         String.Join("\r\n", monitors.Select(m => m.Name + " | " + m.Summary + " | " + m.Adapter + " | " + m.Key + "\r\nRisoluzioni: " + String.Join(", ", Native.Resolutions(m))));
                     report += "\r\nMonitor ricordati da Windows: " + remembered.Count + "\r\nIdentita dei monitor collegati presenti nello storico Windows: " + monitors.Count(m => remembered.Any(r => String.Equals(r.DevicePath, m.Key, StringComparison.OrdinalIgnoreCase))) + "/" + monitors.Count;
+                    report += "\r\n" + String.Join("\r\n", state.Capture(monitors).Select(s => s.Name + ": desktop " + s.Width + " x " + s.Height +
+                        ", segnale " + s.Timing.Active.Width + " x " + s.Timing.Active.Height + ", scaling " + s.Scaling + ", desktop virtuale " + s.DesktopImage.HasValue));
                     if (args[0] == "--validate-current" || args[0] == "--validate-editor")
                     {
                         File.WriteAllText(args[1], report + "\r\nVerifica in corso...");
@@ -65,6 +67,15 @@ namespace MonitorSwitch
                             Native.Plan(Native.BuildPlan(new List<MonitorSetting> { selection }, monitors), true);
                         }
                         report += "\r\nEditor: profili per singolo monitor con proporzioni mantenute validati senza applicare modifiche.";
+                    }
+                    if (args[0] == "--validate-profiles")
+                    {
+                        File.WriteAllText(args[1], report);
+                        foreach (Profile profile in ProfileStore.Load(ProfileStore.FileName).Profiles.Where(p => p.HasLayout))
+                        {
+                            Native.Plan(Native.BuildPlan(profile.Layout, monitors), true);
+                            report += "\r\nProfilo " + profile.Name + ": validazione driver riuscita. Nessuna modifica applicata.";
+                        }
                     }
                     File.WriteAllText(args[1], report);
                     return 0;
@@ -509,10 +520,9 @@ namespace MonitorSwitch
                     using (var recovery = new Guardian())
                     {
                         recovery.Arm(); Recovery.Locked(delegate { Native.Plan(plan, false); });
-                        DisplayState actual = Native.Read(); var inventory = Native.Inventory(actual); var captured = actual.Capture(inventory);
-                        if (!Native.MatchesProtected(profile.Layout, captured)) throw new InvalidOperationException("Risoluzione o proporzioni non rispettate dal driver.");
+                        DisplayObservation observed = DisplayVerification.WaitFor(profile.Layout);
                         if (recovery.HasExited) throw new InvalidOperationException("Protezione del cambio scaduta.");
-                        Recovery.Commit(actual); state = actual; monitors = inventory; return captured;
+                        Recovery.Commit(observed.State); state = observed.State; monitors = observed.Monitors; return observed.Layout;
                     }
                 }
                 catch { if (File.Exists(Recovery.FileName)) Recovery.Restore(); throw; }
@@ -541,9 +551,7 @@ namespace MonitorSwitch
                 Recovery.Locked(delegate { Snapshot.Save(Recovery.FileName, state); }); guardian = new Guardian();
                 Stopwatch deadline = Stopwatch.StartNew(); guardian.Arm();
                 Recovery.Locked(delegate { Native.Plan(plan, false); });
-                DisplayState actual = Native.Read(); List<MonitorInfo> inventory = Native.Inventory(actual);
-                if (!Native.MatchesProtected(profile.Layout, actual.Capture(inventory)))
-                    throw new InvalidOperationException("Windows ha applicato impostazioni diverse dal profilo salvato. La configurazione precedente verra ripristinata.");
+                DisplayObservation observed = DisplayVerification.WaitFor(profile.Layout);
                 if (!background) ShowWindow();
                 if (settings.ConfirmChanges)
                 {
@@ -556,7 +564,7 @@ namespace MonitorSwitch
                     }
                 }
                 else if (deadline.ElapsedMilliseconds >= 25000 || guardian.HasExited) throw new InvalidOperationException("Il cambio ha richiesto troppo tempo. Riprova.");
-                Recovery.Commit(actual); settings.ActiveProfileId = profile.Id; settings.ProfileDeactivated = false; protection.Reset(); SaveSettings();
+                Recovery.Commit(observed.State); settings.ActiveProfileId = profile.Id; settings.ProfileDeactivated = false; protection.Reset(); SaveSettings();
                 status.Text = "Profilo " + profile.Name + " attivo." + (profile.ProtectResolution ? " Protezione risoluzione attiva nel tray." : "");
             }
             catch (Exception ex)
